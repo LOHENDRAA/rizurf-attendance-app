@@ -1,9 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run build && mv dist/index.html app.shell.html",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.php": { "runtime": "vercel-php@0.7.4" }
+    "api/index.php": {
+      "runtime": "vercel-php@0.7.4",
+      "includeFiles": "app.shell.html"
+    }
   },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.php" }

@@ -132,13 +132,117 @@ function verifyGatewayToken(string $jwt, string $expectedUse): array
     return $claims;
 }
 
+// ============================================================================
+// The sign-in flow (MICROAPP_AUTH.md S4-S8). There is no login screen: an
+// unauthenticated visitor is bounced to the gateway, and - because they are
+// already signed in there (they opened this app from the gateway) - the gateway
+// bounces them straight back with a one-time code. The only thing they see is a
+// fast redirect. This app never handles a password.
+// ============================================================================
+
+const SESSION_COOKIE = 'rz_attn_session';
+
+/** {GATEWAY_URL}/oauth/authorize for the redirect. redirect_uri is our own
+ *  configured PUBLIC_URL, never derived from the request (S8). */
+function gatewayAuthorizeUrl(): string
+{
+    $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
+    $redirect = rtrim(envOrFail('PUBLIC_URL'), '/') . '/';
+    return "$gateway/oauth/authorize?redirect_uri=" . rawurlencode($redirect);
+}
+
+/** Exchange the one-time code (server-to-server, no client secret - S4) and
+ *  return the verified identity claims. Throws on anything wrong. */
+function exchangeCodeForIdentity(string $code): array
+{
+    $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
+    $redirect = rtrim(envOrFail('PUBLIC_URL'), '/') . '/';
+    [$status, $body] = httpJson('POST', "$gateway/oauth/token", ['Content-Type: application/json'], [
+        'code' => $code,
+        'redirect_uri' => $redirect,
+    ]);
+    if ($status !== 200 || !isset($body['token'])) {
+        throw new RuntimeException('Code exchange failed.');
+    }
+    return verifyGatewayToken($body['token'], 'identity');
+}
+
+/** Ask the gateway whether the session behind this request is still alive
+ *  (S5). No cache. Fails OPEN on a network error - the session's own expiry is
+ *  the backstop for a gateway that stays down. */
+function gatewaySessionIsLive(array $session): bool
+{
+    if (empty($session['sid'])) {
+        return false;
+    }
+    $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
+    try {
+        [$status, $body] = httpJson('POST', "$gateway/oauth/introspect", ['Content-Type: application/json'], [
+            'sid' => $session['sid'],
+            'sub' => $session['sub'] ?? null,
+        ]);
+        if ($status !== 200) {
+            return true; // fail open
+        }
+        return (bool) ($body['active'] ?? false);
+    } catch (Throwable) {
+        return true; // fail open
+    }
+}
+
+function sessionHmac(string $payload): string
+{
+    return hash_hmac('sha256', $payload, envOrFail('SESSION_SECRET'), true);
+}
+
+/** Set the signed session cookie (S6): HMAC over the claims, HttpOnly,
+ *  SameSite=Lax, Secure on https, short Max-Age. */
+function issueAppSession(array $claims): void
+{
+    $ttl = (int) (env('SESSION_TTL_SECONDS', '900'));
+    $data = [
+        'sid' => $claims['sid'] ?? null,
+        'sub' => $claims['sub'] ?? null,
+        'email' => $claims['email'] ?? null,
+        'name' => $claims['name'] ?? null,
+        'role' => $claims['role'] ?? null,
+        'exp' => time() + $ttl,
+    ];
+    $payload = rtrim(strtr(base64_encode(json_encode($data)), '+/', '-_'), '=');
+    $sig = rtrim(strtr(base64_encode(sessionHmac($payload)), '+/', '-_'), '=');
+    setcookie(SESSION_COOKIE, "$payload.$sig", [
+        'expires' => time() + $ttl,
+        'path' => '/',
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure' => str_starts_with(rtrim((string) env('PUBLIC_URL', ''), '/'), 'https://'),
+    ]);
+}
+
+function clearAppSession(): void
+{
+    setcookie(SESSION_COOKIE, '', ['expires' => 1, 'path' => '/']);
+}
+
 /**
- * The app's own session (MICROAPP_AUTH.md). Not built yet - the gateway
- * sign-in flow that issues this cookie is the remaining piece of work. Returns
- * null until then, so browser calls fall through to DEV_ALLOW_NO_AUTH locally
- * and to a 401 on the deployed service.
+ * The app's own session (MICROAPP_AUTH.md S3/S6). Parse the cookie, verify the
+ * HMAC in constant time, check expiry. Returns the claims or null - an expired
+ * or tampered cookie is treated as absent.
  */
 function validateAppSession(): ?array
 {
-    return null;
+    $raw = $_COOKIE[SESSION_COOKIE] ?? '';
+    if (!is_string($raw) || substr_count($raw, '.') !== 1) {
+        return null;
+    }
+    [$payload, $sig] = explode('.', $raw, 2);
+    $expected = rtrim(strtr(base64_encode(sessionHmac($payload)), '+/', '-_'), '=');
+    if (!hash_equals($expected, $sig)) {
+        return null;
+    }
+    $data = json_decode(base64_decode(strtr($payload, '-_', '+/')) ?: '', true);
+    if (!is_array($data) || (int) ($data['exp'] ?? 0) < time()) {
+        return null;
+    }
+    return $data;
 }

@@ -248,7 +248,7 @@ function internIdByEmail(string $email): ?string
 //   - token   : a machine caller (client_credentials). It has no single intern,
 //               so it MUST pass ?intern_id= or ?intern_ref=.
 //   - session : a signed-in human. Uses app_identities.intern_id for their
-//               gateway_sub (NOT BUILT YET - validateAppSession() returns null).
+//               gateway_sub (the row is kept fresh by upsertAppIdentity()).
 //   - dev     : DEV_ALLOW_NO_AUTH. Uses DEV_GATEWAY_SUB or DEV_INTERN_REF.
 // Every query downstream is already keyed by the id this returns.
 // ----------------------------------------------------------------------------
@@ -276,7 +276,7 @@ function currentInternId(PDO $pdo): string
     }
 
     if ($auth['kind'] === 'session') {
-        $sub = (string) ($auth['session']['gateway_sub'] ?? '');
+        $sub = (string) ($auth['session']['sub'] ?? '');
         return internIdForGatewaySub($pdo, $sub);
     }
 
@@ -316,6 +316,40 @@ function internIdForGatewaySub(PDO $pdo, string $gatewaySub): string
     $pdo->prepare('UPDATE app_identities SET intern_id = ?, intern_synced_at = now() WHERE gateway_sub = ?')
         ->execute([$internId, $gatewaySub]);
     return $internId;
+}
+
+/**
+ * The sign-in upsert (AUTH-MODEL.md S2). Called on every authenticated request
+ * from the *verified* identity claims - never from a header. Keeps
+ * email/name/role and last_seen_at fresh; the intern link is filled lazily by
+ * internIdForGatewaySub().
+ */
+function upsertAppIdentity(PDO $pdo, array $claims): void
+{
+    $params = [
+        ':sub' => $claims['sub'] ?? '',
+        ':email' => $claims['email'] ?? '',
+        ':name' => $claims['name'] ?? null,
+        ':role' => $claims['role'] ?? null,
+    ];
+    if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+        $sql = 'INSERT INTO app_identities (gateway_sub, email_address, full_name, role)
+                VALUES (:sub, :email, :name, :role)
+                ON DUPLICATE KEY UPDATE
+                  email_address = VALUES(email_address),
+                  full_name     = VALUES(full_name),
+                  role          = VALUES(role),
+                  last_seen_at  = now()';
+    } else {
+        $sql = 'INSERT INTO app_identities (gateway_sub, email_address, full_name, role)
+                VALUES (:sub, :email, :name, :role)
+                ON CONFLICT (gateway_sub) DO UPDATE
+                  SET email_address = EXCLUDED.email_address,
+                      full_name     = EXCLUDED.full_name,
+                      role          = EXCLUDED.role,
+                      last_seen_at  = now()';
+    }
+    $pdo->prepare($sql)->execute($params);
 }
 
 // ----------------------------------------------------------------------------

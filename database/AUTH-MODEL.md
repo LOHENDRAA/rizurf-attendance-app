@@ -5,15 +5,28 @@ screen. That is a hard rule for a Rizurf microapp (SS-24). It has exactly one
 identity table, `app_identities`, and every row in it is written by the server
 from a token the gateway signed.
 
-## 1. Sign-in (the gateway does this)
+## 1. Sign-in (the gateway does this) - no login screen
 
-The flow is in `MICROAPP_AUTH.md` at the repo root. In short: an unauthenticated
-visitor is redirected to `${GATEWAY_URL}/oauth/authorize`, comes back with a
-one-time `code`, the server exchanges it at `${GATEWAY_URL}/oauth/token`,
-verifies the returned identity token's signature against
-`${GATEWAY_URL}/.well-known/jwks.json`, and only then starts its own session.
+There is no login page in this app. `api/index.php`:
 
-The verified token carries `sub`, `email`, `name`, `role`.
+1. A visitor with no session hits any page -> 302 to
+   `${GATEWAY_URL}/oauth/authorize?redirect_uri=${PUBLIC_URL}/`.
+2. They are already signed in at the gateway (they opened this app from it), so
+   the gateway 302s straight back to `${PUBLIC_URL}/?code=...`. The only thing
+   they see is a fast redirect bounce.
+3. `handleGatewayCallback()` exchanges the code at `${GATEWAY_URL}/oauth/token`
+   (server-to-server, no client secret), verifies the returned identity token's
+   RS256 signature against `${GATEWAY_URL}/.well-known/jwks.json` plus
+   `iss`/`aud`/`exp`/`token_use` (`api/gateway.php` `verifyGatewayToken`), then
+   `issueAppSession()` sets a short-lived HMAC-signed `HttpOnly` cookie and it
+   redirects to the clean `/` (code out of history).
+4. Every later request: `validateAppSession()` checks the cookie, then
+   `gatewaySessionIsLive()` asks `${GATEWAY_URL}/oauth/introspect` - no cache -
+   so a gateway sign-out or suspension locks this app within one request.
+   Network error there fails open; the 15-minute cookie TTL is the backstop.
+
+The verified token carries `sub`, `email`, `name`, `role`. There is no
+sign-out button - the gateway is the only place anyone signs in or out.
 
 ## 2. Auto-sync into `app_identities`
 
