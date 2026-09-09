@@ -72,13 +72,18 @@ function env(string $key, ?string $default = null): ?string
     return $value === false ? $default : $value;
 }
 
+/** A required env var is missing. The var name is safe to surface (SS-5). */
+class ConfigException extends RuntimeException
+{
+}
+
 function envOrFail(string $key): string
 {
     $value = env($key);
     if ($value === null || $value === '') {
-        // Throw (not exit) so callers like the /health checks can catch it and
-        // report a dependency as down instead of aborting the whole response.
-        throw new RuntimeException("Missing required environment variable: $key");
+        // Throw (not exit) so /health's checks can catch it and report a
+        // dependency as down instead of aborting the whole response.
+        throw new ConfigException("Missing required environment variable: $key");
     }
     return $value;
 }

@@ -27,6 +27,11 @@ correlationId();
 
 set_exception_handler(static function (Throwable $e): void {
     error_log('[attendance-api] ' . $e);
+    if ($e instanceof ConfigException) {
+        // The message names a missing env var - safe to show, and the actual
+        // reason the deploy is failing.
+        sendError(500, 'SERVER_MISCONFIGURED', $e->getMessage());
+    }
     sendError(500, 'INTERNAL_ERROR', 'Unexpected error.');
 });
 
@@ -117,9 +122,15 @@ if ($path !== '/' && $candidate && $distRoot && str_starts_with($candidate, $dis
     serveStaticFile($candidate);
 }
 
-// --- 4. A page request. Gate it, then serve the SPA shell.
-requirePageSession();
-serveAppShell();
+// --- 4. The app itself. The SPA has no client-side router, so "/" is the only
+// page; anything else is genuinely unrouted and gets the SS-5 envelope (never
+// a redirect - that would fail the gateway's unrouted-path check).
+if ($path === '/') {
+    requirePageSession();
+    serveAppShell();
+}
+
+sendError(404, 'RESOURCE_NOT_FOUND', "No route for $path.");
 
 // ============================================================================
 
