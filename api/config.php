@@ -14,10 +14,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/http.php';
 
-// Vercel/Lambda sets TZ=:UTC, which PHP's date_default_timezone_set() rejects
-// with a Notice. Strip the leading colon and fall back to a known-good zone.
+// PHP's date() zone, from APP_TIMEZONE (Vercel reserves the name TZ and forces
+// it to ":UTC"). Anything empty or unrecognised falls back to the app's home
+// zone rather than silently running in UTC.
 (static function (): void {
-    $tz = ltrim((string) env('TZ', ''), ':');
+    $tz = ltrim((string) env('APP_TIMEZONE', ''), ':');
     if ($tz === '' || !in_array($tz, timezone_identifiers_list(), true)) {
         $tz = 'Asia/Kuala_Lumpur';
     }

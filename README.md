@@ -43,10 +43,13 @@ as `.env.example`, real values); leave `DEV_ALLOW_NO_AUTH` unset:
 ```
 DB_HOST   DB_PORT   DB_NAME   DB_USER   DB_PASSWORD   DB_TIME_ZONE
 GATEWAY_URL   PUBLIC_URL (= https://<your-vercel-domain>)   SERVICE_ID   APP_VERSION
-SESSION_SECRET   SESSION_TTL_SECONDS
+SESSION_SECRET   SESSION_TTL_SECONDS   APP_TIMEZONE
 INTERN_DB_URL   INTERN_DB_AUDIENCE   INTERN_DB_CLIENT_ID   INTERN_DB_CLIENT_SECRET
 OFFICE_QR   OFFICE_LATITUDE   OFFICE_LONGITUDE   OFFICE_RADIUS_METERS   OFFICE_ADDRESS
 ```
+
+Vercel reserves `TZ`, so this app reads `APP_TIMEZONE` instead (safe
+Asia/Kuala_Lumpur default if unset).
 
 Then in the gateway hub: **Connect a service** → paste the deployment URL. It
 reads `/health` and `/openapi.json` and runs conformance.
