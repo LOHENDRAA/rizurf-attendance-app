@@ -30,12 +30,12 @@ create extension if not exists "pgcrypto";
 -- The server UPSERTs this on every sign-in from the *verified* identity token
 -- (never from a header or the request origin - SS-25):
 --
---   insert into app_identities (gateway_sub, email_address, full_name, gateway_role)
+--   insert into app_identities (gateway_sub, email_address, full_name, role)
 --   values ($sub, $email, $name, $role)
 --   on conflict (gateway_sub) do update
 --     set email_address = excluded.email_address,
 --         full_name     = excluded.full_name,
---         gateway_role  = excluded.gateway_role,
+--         role          = excluded.role,
 --         last_seen_at  = now();
 --
 -- Then, if `intern_id` is still null, the server resolves it against the Intern
@@ -57,19 +57,18 @@ create table if not exists public.app_identities (
   email_address      text not null,
   full_name          text,
 
-  -- Gateway *console* role (admin / platform / developer / viewer). A hint
-  -- only; never gate a feature on it. Use `app_role`.
-  gateway_role       text,
+  -- The gateway role from the verified identity token: 'admin' / 'hr' /
+  -- 'supervisor' / 'user' (MICROAPP_AUTH.md S2). Authorization reads this live
+  -- from the token on every request; this column is only a synced snapshot for
+  -- admin-side queries ("list the supervisors") that shouldn't call the
+  -- gateway. No CHECK - store whatever the verified token carries.
+  role               text,
 
   -- The intern id issued by the Intern Database service. Not a foreign key -
-  -- that service owns the record. Null until the email match succeeds.
+  -- that service owns the record. Null until the email match succeeds
+  -- (e.g. a supervisor or hr user who is not an intern).
   intern_id          uuid,
   intern_synced_at   timestamptz,
-
-  -- THIS app's authorization for this person (SS-24: a local role table keyed
-  -- to the gateway identity, not the gateway role).
-  app_role           text not null default 'intern'
-                       check (app_role in ('intern', 'supervisor', 'admin')),
 
   created_at         timestamptz not null default now(),
   last_seen_at       timestamptz not null default now()

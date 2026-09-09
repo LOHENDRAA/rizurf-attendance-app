@@ -20,21 +20,33 @@ The verified token carries `sub`, `email`, `name`, `role`.
 On every authenticated request the server upserts the identity by `gateway_sub`:
 
 ```sql
-insert into app_identities (gateway_sub, email_address, full_name, gateway_role)
+insert into app_identities (gateway_sub, email_address, full_name, role)
 values ($sub, $email, $name, $role)
 on conflict (gateway_sub) do update
   set email_address = excluded.email_address,
       full_name     = excluded.full_name,
-      gateway_role  = excluded.gateway_role,
+      role          = excluded.role,
       last_seen_at  = now();
 ```
 
 "Whatever email or id the gateway signs in with auto-syncs to this app" -
 that's this upsert. Nothing is typed in by hand.
 
-`gateway_role` is stored but never used to decide what someone may do here.
-Authorization is `app_identities.app_role` (`intern` / `supervisor` / `admin`),
-which an admin sets.
+## Roles
+
+The gateway role - `admin` / `hr` / `supervisor` / `user` - comes verified in
+the identity token and is read **live from the session on every request**
+(`MICROAPP_AUTH.md` S2), used directly:
+
+- `user` - an intern using the app for themselves (their own attendance + leave)
+- `supervisor` - sees their team's view; reviews leave requests
+- `hr` / `admin` - full access
+
+There is **no local role table** - the doc is explicit that a parallel system
+is the wrong reach when the four gateway roles already cover it. The `role`
+column on `app_identities` is only a synced snapshot so admin-side screens can
+list "the supervisors" without calling the gateway; it is never the source of
+an authorization decision.
 
 ## 3. Link to an intern (Intern Database service)
 

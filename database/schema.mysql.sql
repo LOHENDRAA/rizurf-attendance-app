@@ -33,14 +33,15 @@ CREATE TABLE IF NOT EXISTS app_identities (
   gateway_sub       VARCHAR(255) NOT NULL,
   email_address     VARCHAR(320) NOT NULL,
   full_name         VARCHAR(255) NULL,
-  -- Gateway console role (admin / platform / developer / viewer). A hint only;
-  -- authorization is app_role.
-  gateway_role      VARCHAR(40)  NULL,
+  -- The gateway role from the verified identity token: 'admin' / 'hr' /
+  -- 'supervisor' / 'user' (MICROAPP_AUTH.md S2). Authorization reads it live
+  -- from the token each request; this column is only a synced snapshot for
+  -- admin-side queries.
+  role              VARCHAR(40)  NULL,
   -- The uuid the Intern Database issued. Not a foreign key - that service owns
   -- the record. NULL until the email match succeeds.
   intern_id         CHAR(36)     NULL,
   intern_synced_at  TIMESTAMP    NULL DEFAULT NULL,
-  app_role          ENUM('intern','supervisor','admin') NOT NULL DEFAULT 'intern',
   created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_seen_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

@@ -32,12 +32,12 @@ create extension if not exists "pgcrypto";
 --
 -- UPSERT on every verified sign-in, keyed by the token's `sub`:
 --
---   insert into app_identities (gateway_sub, email_address, full_name, gateway_role)
+--   insert into app_identities (gateway_sub, email_address, full_name, role)
 --   values ($sub, $email, $name, $role)
 --   on conflict (gateway_sub) do update
 --     set email_address = excluded.email_address,
 --         full_name     = excluded.full_name,
---         gateway_role  = excluded.gateway_role,
+--         role          = excluded.role,
 --         last_seen_at  = now();
 --
 -- Then, if intern_id is null, resolve it against the Intern Database by email
@@ -51,16 +51,15 @@ create table if not exists public.app_identities (
   email_address      text not null,
   full_name          text,
 
-  -- Gateway console role (admin / platform / developer / viewer). A hint only;
-  -- never gate a feature on it. Use `app_role`.
-  gateway_role       text,
+  -- The gateway role from the verified identity token: 'admin' / 'hr' /
+  -- 'supervisor' / 'user' (MICROAPP_AUTH.md S2). Authorization reads it live
+  -- from the token each request; this column is only a synced snapshot for
+  -- admin-side queries. No CHECK - store what the verified token carries.
+  role               text,
 
   -- Intern Database id. Not a foreign key - that service owns the record.
   intern_id          uuid,
   intern_synced_at   timestamptz,
-
-  app_role           text not null default 'intern'
-                       check (app_role in ('intern', 'supervisor', 'admin')),
 
   created_at         timestamptz not null default now(),
   last_seen_at       timestamptz not null default now()

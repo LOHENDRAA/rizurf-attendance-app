@@ -61,9 +61,9 @@ already recognise as yours.
   "token_use": "identity",
   "sid": "a1b2c3d4-...",
   "sub": "3950f77e-...",
-  "email": "dev@rizurf.local",
-  "name": "Dev Tester",
-  "role": "developer",
+  "email": "supervisor@rizurf.local",
+  "name": "Sam Supervisor",
+  "role": "supervisor",
   "iss": "http://127.0.0.1:4301",
   "aud": "your-service-id",
   "exp": 1787999999
@@ -74,11 +74,29 @@ Deliberately thin, and deliberately short-lived (five minutes) — it exists to
 prove who just signed in, once, so you can start your **own** session. It is
 not an API credential and must never be held onto past that.
 
-`role` is the gateway's *console* role (admin / platform / developer /
-viewer) — a hint, not an instruction. It describes access to the gateway
-console, not to your app. What a caller may do inside **your** app is your
-own decision (SS-24), usually a local role table keyed to `sub` or `email` —
-never gated on `role` directly.
+`role` is the gateway's own role (`admin` / `hr` / `supervisor` / `user` —
+see RIZURF_API_TEMPLATE.md's SS-24) — already verified, already in your
+session the moment sign-in completes, and free to use directly for the
+common case: hide an admin-only button from a `user`, show a supervisor
+their team's view instead of their own. Most apps need nothing more than
+that, so don't build a parallel role system just to avoid this field.
+
+```js
+// After verifying the token (section 3) and starting your own session,
+// `claims.role` is exactly this value — use it straight away.
+if (session.role === "supervisor") {
+  return renderTeamDashboard(session);
+}
+return renderMyTasksView(session);
+```
+
+The one thing this field can't do is describe something the gateway's four
+roles don't capture — a `technician` vs. `tenant` split inside a maintenance
+app, say, where neither maps to anything above. If your app genuinely needs
+roles like that, keep a **local** table keyed to `sub` or `email` and layer
+it on top of `role` rather than replacing it — the gateway's role still
+tells you the person's standing across the whole company; yours only ever
+tells you what's specific to this one app.
 
 **`sid`** is the field this whole document exists to explain. Keep it in your
 own session. It is what you ask `/oauth/introspect` about.
@@ -401,3 +419,46 @@ clients** admin page and receiving a scoped **access** token
 what the client was granted) that you check against what the specific
 endpoint requires, the same way SS-6/SS-7 already describe. Out of scope for
 this document beyond that pointer; ask if a service genuinely needs this.
+
+---
+
+## 11. Your app's own data references another service's roster (e.g. attendance → intern-database)
+
+This is not a special case — it's §4 and §10 used together, and it's worth
+spelling out because it's easy to reach for something heavier.
+
+Say you're building the attendance app, and every attendance record needs to
+be tied to a real intern who lives in `intern-database`, not a user your app
+invented. Two separate things are happening, over two separate channels:
+
+1. **Who is signing in, right now, in a browser.** That's §4, unmodified.
+   The person hits your app, you bounce them to the gateway, they come back
+   with an identity token. You verify it (§3) and read its `email` claim —
+   that's the login. Nothing about intern-database is involved yet, and
+   nothing about it needs to be: the gateway is the one place identity gets
+   asserted, and your app trusts that assertion the same way every other
+   microapp does.
+
+2. **Resolving *which* intern that email belongs to.** That's a plain
+   server-to-server data call, not a login. Your app requests its own
+   `client_credentials` access token (§10) against whatever grants it was
+   registered with — for this pattern that's read access to
+   `intern-database`'s `/api/interns` (and whatever endpoint gives you a
+   department, schedule, etc., if attendance needs those too). Call it with
+   the signed-in person's email from step 1, get back their intern record
+   (`ref_number`, name, department...), and that's the row your attendance
+   records actually reference — not the identity token, which is disposable
+   and expires in five minutes.
+
+The gateway's own signup flow (`lib/roster/lookup.ts`) does exactly this
+same two-step, for the same reason: sign-in stays the gateway's job, and the
+roster lookup is a scoped, revocable API call the way any other
+service-to-service integration is. Nothing about needing another service's
+data changes how a person signs in — it only adds a lookup your app makes
+with credentials it already has.
+
+In this codebase, the API client **"Connect Intern DB to Attendance"**
+already exists in **Access & roles → API clients**, granted intern-database
+read access — that's the credential the attendance app's server uses for
+step 2. If it also needs department data, add a grant for that on the same
+client rather than creating a second one.
