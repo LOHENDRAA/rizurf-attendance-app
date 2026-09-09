@@ -193,29 +193,8 @@ left join public.leave_requests mc
   and mc.status     = 'Approved';
 
 
--- ############################################################################
--- SECTION 5 - DEV SEED (delete this whole section for a clean deployment)
--- ############################################################################
--- Uses a real intern id from the Intern Database (INT-0007) so DEV_INTERN_REF
--- / the API resolution have something to match.
--- ============================================================================
-insert into public.app_identities
-  (gateway_sub, email_address, full_name, gateway_role, intern_id, intern_synced_at, app_role)
-values
-  ('00000000-0000-0000-0000-0000000000aa', 'gabitautau@gmail.com', 'Tauedea Gabi', 'developer',
-   '1cbd743f-a595-436b-91a3-f852de36001e', now(), 'admin')
-on conflict (gateway_sub) do nothing;
-
-insert into public.attendance_records
-  (intern_id, attendance_date, clock_in, clock_out, clock_in_mode, clock_out_mode, status)
-values
-  ('1cbd743f-a595-436b-91a3-f852de36001e', date '2026-09-07',
-   timestamptz '2026-09-07 08:56:00+08', timestamptz '2026-09-07 18:02:00+08', 'Office', 'Office', 'On time'),
-  ('1cbd743f-a595-436b-91a3-f852de36001e', date '2026-09-04',
-   timestamptz '2026-09-04 09:18:00+08', timestamptz '2026-09-04 18:11:00+08', 'Office', 'Office', 'Late'),
-  ('1cbd743f-a595-436b-91a3-f852de36001e', date '2026-09-03',
-   timestamptz '2026-09-03 08:49:00+08', timestamptz '2026-09-03 17:58:00+08', 'Hybrid', 'Hybrid', 'On time')
-on conflict (intern_id, attendance_date) do nothing;
+-- No seed data. Every intern comes from the Intern Database service; attendance
+-- and leave rows are created by the app as interns clock in and file requests.
 
 
 -- ############################################################################

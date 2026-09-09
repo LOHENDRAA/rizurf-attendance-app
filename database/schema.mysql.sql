@@ -129,25 +129,8 @@ LEFT JOIN leave_requests mc
   AND mc.status     = 'Approved';
 
 
--- ============================================================================
--- DEV SEED (delete this block for a clean deployment).
--- Uses a real Intern Database id (INT-0007, gabitautau@gmail.com) so
--- DEV_INTERN_REF / the API resolution have something to match.
--- ============================================================================
-INSERT INTO app_identities
-  (gateway_sub, email_address, full_name, gateway_role, intern_id, intern_synced_at, app_role)
-VALUES
-  ('00000000-0000-0000-0000-0000000000aa', 'gabitautau@gmail.com', 'Tauedea Gabi', 'developer',
-   '1cbd743f-a595-436b-91a3-f852de36001e', NOW(), 'admin')
-ON DUPLICATE KEY UPDATE email_address = VALUES(email_address);
-
-INSERT INTO attendance_records
-  (intern_id, attendance_date, clock_in, clock_out, clock_in_mode, clock_out_mode, status)
-VALUES
-  ('1cbd743f-a595-436b-91a3-f852de36001e', '2026-09-07', '2026-09-07 08:56:00', '2026-09-07 18:02:00', 'Office', 'Office', 'On time'),
-  ('1cbd743f-a595-436b-91a3-f852de36001e', '2026-09-04', '2026-09-04 09:18:00', '2026-09-04 18:11:00', 'Office', 'Office', 'Late'),
-  ('1cbd743f-a595-436b-91a3-f852de36001e', '2026-09-03', '2026-09-03 08:49:00', '2026-09-03 17:58:00', 'Hybrid', 'Hybrid', 'On time')
-ON DUPLICATE KEY UPDATE status = VALUES(status);
+-- No seed data. Every intern comes from the Intern Database service; attendance
+-- and leave rows are created by the app as interns clock in and file requests.
 
 
 -- ============================================================================
