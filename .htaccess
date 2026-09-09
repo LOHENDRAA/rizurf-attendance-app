@@ -1,0 +1,7 @@
+DirectoryIndex index.php
+RewriteEngine On
+
+RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
+RewriteRule ^manifest\.webmanifest$ public/manifest.webmanifest [L]
+RewriteRule ^sw\.js$ public/sw.js [L]
+RewriteRule ^favicon\.svg$ public/favicon.svg [L]
