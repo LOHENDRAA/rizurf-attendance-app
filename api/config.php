@@ -100,8 +100,12 @@ function respond(array $payload, int $status = 200): never
 // ----------------------------------------------------------------------------
 
 /**
- * One PDO connection to Postgres, from DATABASE_URL_DIRECT (session-mode /
- * direct string on :5432 - right for a long-lived PHP-FPM process).
+ * One PDO connection, from DATABASE_URL_DIRECT. Supports both engines so the
+ * VPS can run MySQL:
+ *   postgresql://user:pass@host:5432/db   (Supabase - session/direct string)
+ *   mysql://user:pass@host:3306/db        (self-hosted MySQL 8)
+ * The SQL the app runs (now(), FOR UPDATE, the attendance_feed view) is valid
+ * on both.
  */
 function database(): PDO
 {
@@ -112,21 +116,35 @@ function database(): PDO
 
     $url = envOrFail('DATABASE_URL_DIRECT');
     $parts = parse_url($url);
-    if ($parts === false || !isset($parts['host'])) {
-        respond(['success' => false, 'message' => 'DATABASE_URL_DIRECT is not a valid connection string.'], 500);
+    if ($parts === false || !isset($parts['host'], $parts['scheme'])) {
+        throw new RuntimeException('DATABASE_URL_DIRECT is not a valid connection string.');
     }
 
     $host = $parts['host'];
-    $port = $parts['port'] ?? 5432;
-    $dbname = isset($parts['path']) ? ltrim($parts['path'], '/') : 'postgres';
-    $user = isset($parts['user']) ? rawurldecode($parts['user']) : 'postgres';
+    $dbname = isset($parts['path']) ? ltrim($parts['path'], '/') : '';
+    $user = isset($parts['user']) ? rawurldecode($parts['user']) : '';
     $password = isset($parts['pass']) ? rawurldecode($parts['pass']) : '';
+    $isMysql = in_array($parts['scheme'], ['mysql', 'mysql2', 'mariadb'], true);
+    $port = $parts['port'] ?? ($isMysql ? 3306 : 5432);
 
-    $dsn = "pgsql:host=$host;port=$port;dbname=$dbname;sslmode=require";
+    if ($isMysql) {
+        $dsn = "mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4";
+    } else {
+        $dsn = "pgsql:host=$host;port=$port;dbname=" . ($dbname ?: 'postgres') . ';sslmode=require';
+    }
+
     $pdo = new PDO($dsn, $user, $password, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
+
+    if ($isMysql) {
+        // clock_in/clock_out are TIMESTAMP; align the session with the app's zone
+        // so times store and read back as Asia/Kuala_Lumpur (default +08:00).
+        $offset = env('DB_TIME_ZONE', '+08:00');
+        $pdo->exec("SET time_zone = " . $pdo->quote($offset));
+    }
+
     return $pdo;
 }
 
