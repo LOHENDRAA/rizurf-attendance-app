@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+// A JSON API must never render a PHP notice/warning into the response body
+// (it did, on Vercel: TZ=:UTC -> Notice -> "headers already sent" cascade ->
+// invalid JSON). Log everything, display nothing.
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
 // ============================================================================
 // Shared HTTP helpers used by the front controller (index.php) and handlers.
 //

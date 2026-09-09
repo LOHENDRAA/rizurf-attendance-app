@@ -14,7 +14,15 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/http.php';
 
-date_default_timezone_set(env('TZ', 'Asia/Kuala_Lumpur'));
+// Vercel/Lambda sets TZ=:UTC, which PHP's date_default_timezone_set() rejects
+// with a Notice. Strip the leading colon and fall back to a known-good zone.
+(static function (): void {
+    $tz = ltrim((string) env('TZ', ''), ':');
+    if ($tz === '' || !in_array($tz, timezone_identifiers_list(), true)) {
+        $tz = 'Asia/Kuala_Lumpur';
+    }
+    date_default_timezone_set($tz);
+})();
 
 /** Kept equal to /health's version and openapi info.version (SS-2). */
 function appVersion(): string
@@ -67,7 +75,9 @@ function envOrFail(string $key): string
 {
     $value = env($key);
     if ($value === null || $value === '') {
-        respond(['success' => false, 'message' => "Server misconfigured: $key is not set."], 500);
+        // Throw (not exit) so callers like the /health checks can catch it and
+        // report a dependency as down instead of aborting the whole response.
+        throw new RuntimeException("Missing required environment variable: $key");
     }
     return $value;
 }

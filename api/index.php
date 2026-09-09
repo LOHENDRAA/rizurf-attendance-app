@@ -69,8 +69,8 @@ $GLOBALS['auth'] = $auth;
 
 // Dispatch.
 if ($path === '/health') {
-    $health = healthDocument();
-    sendJson($health['status'] === 'down' ? 503 : 200, $health);
+    // SS-2: MUST be 200; the `status` field carries ok / degraded / down.
+    sendJson(200, healthDocument());
 }
 if ($path === '/openapi.json') {
     sendJson(200, openapiDocument());
@@ -95,7 +95,9 @@ sendError(500, 'INTERNAL_ERROR', 'Route matched but no handler ran.');
  */
 function authenticate(): ?array
 {
-    $header = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+    $header = $_SERVER['HTTP_AUTHORIZATION']
+        ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
+        ?? '';
     if ($header === '' && function_exists('getallheaders')) {
         foreach (getallheaders() as $name => $value) {
             if (strcasecmp($name, 'Authorization') === 0) {
