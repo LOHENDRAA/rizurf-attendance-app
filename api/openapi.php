@@ -84,12 +84,34 @@ function openapiDocument(): array
                 'get' => [
                     'summary' => 'Liveness and dependency checks for this service.',
                     'responses' => ['200' => ['description' => 'Service status.']],
+                    'x-rizurf' => [
+                        'name' => 'Health Check',
+                        'purpose' => 'Tell whether this service is up and its dependencies reachable',
+                        'use_when' => ['Monitoring the service', 'Before routing traffic to it'],
+                        'do_not_use_when' => ['You need attendance or leave data - use the /api endpoints'],
+                        'inputs' => [],
+                        'outputs' => ['status', 'service', 'version', 'checks'],
+                        'requires' => [],
+                        'related_endpoints' => ['GET /openapi.json'],
+                        'tags' => ['health', 'status', 'liveness', 'monitoring', 'uptime'],
+                    ],
                 ],
             ],
             '/openapi.json' => [
                 'get' => [
                     'summary' => 'This OpenAPI document.',
                     'responses' => ['200' => ['description' => 'The API description.']],
+                    'x-rizurf' => [
+                        'name' => 'API Document',
+                        'purpose' => 'Describe every endpoint this service exposes',
+                        'use_when' => ['Discovering the API', 'Generating a client'],
+                        'do_not_use_when' => ['You need attendance or leave data'],
+                        'inputs' => [],
+                        'outputs' => ['openapi', 'info', 'paths'],
+                        'requires' => [],
+                        'related_endpoints' => ['GET /health'],
+                        'tags' => ['openapi', 'schema', 'spec', 'discovery', 'docs'],
+                    ],
                 ],
             ],
             '/api/attendance' => [
