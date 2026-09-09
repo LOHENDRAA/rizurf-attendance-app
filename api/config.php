@@ -12,7 +12,15 @@ declare(strict_types=1);
 // hardcoded here (SS-20).
 // ============================================================================
 
+require_once __DIR__ . '/http.php';
+
 date_default_timezone_set(env('TZ', 'Asia/Kuala_Lumpur'));
+
+/** Kept equal to /health's version and openapi info.version (SS-2). */
+function appVersion(): string
+{
+    return env('APP_VERSION', '1.0.0');
+}
 
 /**
  * Read .env (repo root) once into the process environment. Real env vars win,
@@ -64,11 +72,16 @@ function envOrFail(string $key): string
     return $value;
 }
 
+/**
+ * The browser-facing shape ({success, message, ...}) for the SPA's own
+ * endpoints. Router-level failures (401/404/405/500) use sendError()'s SS-5
+ * envelope instead; this is only the handler business responses.
+ */
 function respond(array $payload, int $status = 200): never
 {
     http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($payload);
+    baseHeaders();
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES);
     exit;
 }
 
@@ -202,33 +215,46 @@ function internIdByEmail(string $email): ?string
 // ----------------------------------------------------------------------------
 // Who is this request for?
 //
-// THE SEAM. Today it resolves a fixed development intern. When the gateway
-// sign-in is wired in (MICROAPP_AUTH.md), this reads the signed session cookie,
-// checks the gateway session is still live, and returns app_identities.intern_id
-// for that gateway_sub - resolving + caching it via the Intern Database API on
-// first sight. Every query downstream is already keyed by the id this returns.
+// THE SEAM. Resolution depends on how the caller authenticated ($GLOBALS['auth']
+// set by index.php):
+//   - token   : a machine caller (client_credentials). It has no single intern,
+//               so it MUST pass ?intern_id= or ?intern_ref=.
+//   - session : a signed-in human. Uses app_identities.intern_id for their
+//               gateway_sub (NOT BUILT YET - validateAppSession() returns null).
+//   - dev     : DEV_ALLOW_NO_AUTH. Uses DEV_GATEWAY_SUB or DEV_INTERN_REF.
+// Every query downstream is already keyed by the id this returns.
 // ----------------------------------------------------------------------------
 function currentInternId(PDO $pdo): string
 {
+    $auth = $GLOBALS['auth'] ?? ['kind' => 'dev'];
+
+    if ($auth['kind'] === 'token') {
+        $explicit = trim((string) ($_GET['intern_id'] ?? ''));
+        if ($explicit !== '') {
+            if (!preg_match('/^[0-9a-f-]{36}$/i', $explicit)) {
+                respond(['success' => false, 'message' => 'intern_id must be a uuid.'], 422);
+            }
+            return $explicit;
+        }
+        $ref = trim((string) ($_GET['intern_ref'] ?? ''));
+        if ($ref !== '') {
+            $internId = internIdByRef($ref);
+            if (!$internId) {
+                respond(['success' => false, 'message' => "No intern with ref_number \"$ref\"."], 422);
+            }
+            return $internId;
+        }
+        respond(['success' => false, 'message' => 'A service caller must pass intern_id or intern_ref.'], 422);
+    }
+
+    if ($auth['kind'] === 'session') {
+        $sub = (string) ($auth['session']['gateway_sub'] ?? '');
+        return internIdForGatewaySub($pdo, $sub);
+    }
+
     $gatewaySub = env('DEV_GATEWAY_SUB');
     if ($gatewaySub !== null && $gatewaySub !== '') {
-        $statement = $pdo->prepare('SELECT intern_id, email_address FROM app_identities WHERE gateway_sub = ?');
-        $statement->execute([$gatewaySub]);
-        $row = $statement->fetch();
-        if (!$row) {
-            respond(['success' => false, 'message' => "No app_identities row for DEV_GATEWAY_SUB \"$gatewaySub\"."], 500);
-        }
-        if ($row['intern_id']) {
-            return (string) $row['intern_id'];
-        }
-        // Auto-sync: resolve the intern from the Intern Database by email, store it.
-        $internId = internIdByEmail((string) $row['email_address']);
-        if (!$internId) {
-            respond(['success' => false, 'message' => "No intern in the Intern Database with email {$row['email_address']}."], 500);
-        }
-        $pdo->prepare('UPDATE app_identities SET intern_id = ?, intern_synced_at = now() WHERE gateway_sub = ?')
-            ->execute([$internId, $gatewaySub]);
-        return $internId;
+        return internIdForGatewaySub($pdo, $gatewaySub);
     }
 
     $ref = env('DEV_INTERN_REF', 'INT-0007');
@@ -236,6 +262,31 @@ function currentInternId(PDO $pdo): string
     if (!$internId) {
         respond(['success' => false, 'message' => "No intern in the Intern Database with ref_number \"$ref\". Set DEV_INTERN_REF."], 500);
     }
+    return $internId;
+}
+
+/**
+ * The intern id for a gateway identity, from app_identities. If it is not
+ * linked yet, resolve it from the Intern Database by email and write it back
+ * ("whatever email the gateway signs in with auto-syncs to this app").
+ */
+function internIdForGatewaySub(PDO $pdo, string $gatewaySub): string
+{
+    $statement = $pdo->prepare('SELECT intern_id, email_address FROM app_identities WHERE gateway_sub = ?');
+    $statement->execute([$gatewaySub]);
+    $row = $statement->fetch();
+    if (!$row) {
+        respond(['success' => false, 'message' => "No app_identities row for \"$gatewaySub\"."], 500);
+    }
+    if ($row['intern_id']) {
+        return (string) $row['intern_id'];
+    }
+    $internId = internIdByEmail((string) $row['email_address']);
+    if (!$internId) {
+        respond(['success' => false, 'message' => "No intern in the Intern Database with email {$row['email_address']}."], 500);
+    }
+    $pdo->prepare('UPDATE app_identities SET intern_id = ?, intern_synced_at = now() WHERE gateway_sub = ?')
+        ->execute([$internId, $gatewaySub]);
     return $internId;
 }
 
