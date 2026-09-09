@@ -4,10 +4,17 @@ require __DIR__ . '/config.php';
 
 try {
     $pdo = database();
+    $internId = currentInternId($pdo);
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $statement = $pdo->prepare('SELECT id, leave_date, category, attachment_name, notes, status, created_at FROM leave_requests WHERE employee_id = ? ORDER BY leave_date DESC, id DESC LIMIT 30');
-        $statement->execute([EMPLOYEE_ID]);
+        $statement = $pdo->prepare(
+            'SELECT id, leave_date, category, attachment_name, notes, status, created_at
+               FROM leave_requests
+              WHERE intern_id = ?
+              ORDER BY leave_date DESC, created_at DESC
+              LIMIT 30'
+        );
+        $statement->execute([$internId]);
         respond(['success' => true, 'requests' => $statement->fetchAll()]);
     }
 
@@ -27,9 +34,12 @@ try {
         respond(['success' => false, 'message' => 'Enter a valid date and leave category.'], 422);
     }
 
-    $statement = $pdo->prepare('INSERT INTO leave_requests (employee_id, employee_name, leave_date, category, attachment_name, notes) VALUES (?, ?, ?, ?, ?, ?)');
-    $statement->execute([EMPLOYEE_ID, EMPLOYEE_NAME, $leaveDate, $category, $attachmentName, $notes]);
+    $statement = $pdo->prepare(
+        'INSERT INTO leave_requests (intern_id, leave_date, category, attachment_name, notes)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    $statement->execute([$internId, $leaveDate, $category, $attachmentName, $notes]);
     respond(['success' => true, 'message' => 'Request submitted for approval.']);
 } catch (Throwable $error) {
-    respond(['success' => false, 'message' => 'Leave service unavailable. Import the updated database/schema.sql.'], 500);
+    respond(['success' => false, 'message' => 'Leave service unavailable. Check DATABASE_URL_DIRECT and that database/schema.supabase.sql has been applied.'], 500);
 }
