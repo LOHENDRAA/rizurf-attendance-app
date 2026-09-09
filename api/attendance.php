@@ -93,5 +93,5 @@ try {
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    respond(['success' => false, 'message' => 'Database unavailable. Check DATABASE_URL_DIRECT and that database/schema.supabase.sql has been applied.'], 500);
+    respond(['success' => false, 'message' => 'Database unavailable. Check the DB_* settings and that database/schema.mysql.sql has been applied.'], 500);
 }

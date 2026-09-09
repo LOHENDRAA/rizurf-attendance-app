@@ -1,20 +1,20 @@
 -- ============================================================================
--- Rizurf Attendance App - MySQL schema (self-hosted VPS)
--- MySQL 8.0.16+ (or MariaDB 10.5+). Import with:
+-- Rizurf Attendance App - database schema. MySQL 5.7+ / 8.0, MariaDB 10.2+.
 --
---   mysql -u root -p < database/schema.mysql.sql
+--   mysql -h <DB_HOST> -P <DB_PORT> -u root -p < database/schema.mysql.sql
 --
--- Same model as schema.postgres.sql / schema.supabase.sql, in MySQL form:
---   * BIGINT auto-increment PKs (not uuid) - the app treats `id` as opaque.
+-- Model:
+--   * BIGINT auto-increment PKs - the app treats `id` as opaque.
 --   * intern_id is CHAR(36): the uuid the Intern Database service issues.
---   * ENUMs instead of CHECK-in lists; native ON UPDATE CURRENT_TIMESTAMP
---     instead of the set_updated_at() trigger.
---   * No interns table (owned by the Intern Database service, SS-13) and no
---     password column (auth is the Rizurf gateway's, SS-24).
+--     There is NO interns table here (that service owns it, SS-13).
+--   * No password column - authentication is the Rizurf gateway's (SS-24).
+--   * ENUMs instead of CHECK-in lists; native ON UPDATE CURRENT_TIMESTAMP.
 --
--- Time zone: clock_in/clock_out are TIMESTAMP (stored UTC, converted per the
--- session time zone). Run the server or the app connection at '+08:00'
--- (api/config.php does `SET time_zone` on connect) so times display in
+-- MySQL 5.7 parses but does not enforce the CHECK constraint below (8.0.16+
+-- and MariaDB 10.2+ do). The app validates clock order regardless.
+--
+-- Time zone: clock_in / clock_out are TIMESTAMP. api/config.php pins the
+-- connection to DB_TIME_ZONE ('+08:00' default) so times read back as
 -- Asia/Kuala_Lumpur.
 -- ============================================================================
 

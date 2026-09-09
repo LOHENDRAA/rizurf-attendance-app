@@ -5,7 +5,7 @@ declare(strict_types=1);
 // ============================================================================
 // Shared config + helpers for the attendance API.
 //
-// Database: PostgreSQL (Supabase today, self-hosted on the VPS later).
+// Database: MySQL on the VPS (DB_* env vars).
 // Interns: resolved live from the Intern Database service - this app stores no
 //          intern records (SS-13).
 // All settings come from the environment (.env at the repo root), never
@@ -100,12 +100,9 @@ function respond(array $payload, int $status = 200): never
 // ----------------------------------------------------------------------------
 
 /**
- * One PDO connection, from DATABASE_URL_DIRECT. Supports both engines so the
- * VPS can run MySQL:
- *   postgresql://user:pass@host:5432/db   (Supabase - session/direct string)
- *   mysql://user:pass@host:3306/db        (self-hosted MySQL 8)
- * The SQL the app runs (now(), FOR UPDATE, the attendance_feed view) is valid
- * on both.
+ * One PDO connection to the MySQL database (VPS), from the discrete DB_* env
+ * vars. The session time zone is pinned so TIMESTAMP columns (clock_in /
+ * clock_out) store and read back as Asia/Kuala_Lumpur.
  */
 function database(): PDO
 {
@@ -114,37 +111,22 @@ function database(): PDO
         return $pdo;
     }
 
-    $url = envOrFail('DATABASE_URL_DIRECT');
-    $parts = parse_url($url);
-    if ($parts === false || !isset($parts['host'], $parts['scheme'])) {
-        throw new RuntimeException('DATABASE_URL_DIRECT is not a valid connection string.');
-    }
+    $host = envOrFail('DB_HOST');
+    $port = (int) env('DB_PORT', '3306');
+    $name = envOrFail('DB_NAME');
+    $user = envOrFail('DB_USER');
+    $password = envOrFail('DB_PASSWORD');
 
-    $host = $parts['host'];
-    $dbname = isset($parts['path']) ? ltrim($parts['path'], '/') : '';
-    $user = isset($parts['user']) ? rawurldecode($parts['user']) : '';
-    $password = isset($parts['pass']) ? rawurldecode($parts['pass']) : '';
-    $isMysql = in_array($parts['scheme'], ['mysql', 'mysql2', 'mariadb'], true);
-    $port = $parts['port'] ?? ($isMysql ? 3306 : 5432);
-
-    if ($isMysql) {
-        $dsn = "mysql:host=$host;port=$port;dbname=$dbname;charset=utf8mb4";
-    } else {
-        $dsn = "pgsql:host=$host;port=$port;dbname=" . ($dbname ?: 'postgres') . ';sslmode=require';
-    }
-
-    $pdo = new PDO($dsn, $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-
-    if ($isMysql) {
-        // clock_in/clock_out are TIMESTAMP; align the session with the app's zone
-        // so times store and read back as Asia/Kuala_Lumpur (default +08:00).
-        $offset = env('DB_TIME_ZONE', '+08:00');
-        $pdo->exec("SET time_zone = " . $pdo->quote($offset));
-    }
-
+    $pdo = new PDO(
+        "mysql:host=$host;port=$port;dbname=$name;charset=utf8mb4",
+        $user,
+        $password,
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ],
+    );
+    $pdo->exec('SET time_zone = ' . $pdo->quote(env('DB_TIME_ZONE', '+08:00')));
     return $pdo;
 }
 
@@ -326,30 +308,20 @@ function internIdForGatewaySub(PDO $pdo, string $gatewaySub): string
  */
 function upsertAppIdentity(PDO $pdo, array $claims): void
 {
-    $params = [
+    $pdo->prepare(
+        'INSERT INTO app_identities (gateway_sub, email_address, full_name, role)
+         VALUES (:sub, :email, :name, :role)
+         ON DUPLICATE KEY UPDATE
+           email_address = VALUES(email_address),
+           full_name     = VALUES(full_name),
+           role          = VALUES(role),
+           last_seen_at  = now()'
+    )->execute([
         ':sub' => $claims['sub'] ?? '',
         ':email' => $claims['email'] ?? '',
         ':name' => $claims['name'] ?? null,
         ':role' => $claims['role'] ?? null,
-    ];
-    if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
-        $sql = 'INSERT INTO app_identities (gateway_sub, email_address, full_name, role)
-                VALUES (:sub, :email, :name, :role)
-                ON DUPLICATE KEY UPDATE
-                  email_address = VALUES(email_address),
-                  full_name     = VALUES(full_name),
-                  role          = VALUES(role),
-                  last_seen_at  = now()';
-    } else {
-        $sql = 'INSERT INTO app_identities (gateway_sub, email_address, full_name, role)
-                VALUES (:sub, :email, :name, :role)
-                ON CONFLICT (gateway_sub) DO UPDATE
-                  SET email_address = EXCLUDED.email_address,
-                      full_name     = EXCLUDED.full_name,
-                      role          = EXCLUDED.role,
-                      last_seen_at  = now()';
-    }
-    $pdo->prepare($sql)->execute($params);
+    ]);
 }
 
 // ----------------------------------------------------------------------------
