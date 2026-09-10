@@ -117,17 +117,19 @@ function verifyGatewayToken(string $jwt, string $expectedUse): array
     if (!is_array($claims)) {
         throw new RuntimeException('Unreadable token claims.');
     }
+    // Order per MICROAPP_AUTH.md S9: signature (above), token_use, iss, aud, exp
+    // - failing closed on any of them.
     if (($claims['token_use'] ?? null) !== $expectedUse) {
         throw new RuntimeException("Expected a \"$expectedUse\" token.");
-    }
-    if (!isset($claims['exp']) || (int) $claims['exp'] < time()) {
-        throw new RuntimeException('Token has expired.');
     }
     if (($claims['iss'] ?? null) !== rtrim(envOrFail('GATEWAY_URL'), '/')) {
         throw new RuntimeException('Token issuer is not this app\'s gateway.');
     }
     if (($claims['aud'] ?? null) !== env('SERVICE_ID', 'attendance-api')) {
         throw new RuntimeException('Token audience is not this service.');
+    }
+    if (!isset($claims['exp']) || (int) $claims['exp'] < time()) {
+        throw new RuntimeException('Token has expired.');
     }
     return $claims;
 }
@@ -173,7 +175,11 @@ function exchangeCodeForIdentity(string $code): array
 function gatewaySessionIsLive(array $session): bool
 {
     if (empty($session['sid'])) {
-        return false;
+        // The identity token carried no `sid`, so introspection is impossible.
+        // Fail OPEN and rely on the session TTL (S6) rather than bricking every
+        // request into a redirect loop.
+        error_log('[attendance-api] session has no sid - introspection skipped');
+        return true;
     }
     $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
     try {
