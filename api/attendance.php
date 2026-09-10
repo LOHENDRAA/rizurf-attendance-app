@@ -4,15 +4,30 @@ require_once __DIR__ . '/config.php';
 
 try {
     $pdo = database();
-    $internId = currentInternId($pdo);
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        // Reading is soft: a signed-in person who is not a linked intern gets an
+        // empty history + linked:false, not an error.
+        ['id' => $internId, 'reason' => $reason] = resolveInternId($pdo);
+        if ($internId === null) {
+            respond([
+                'success' => true,
+                'linked' => false,
+                'reason' => $reason,
+                'records' => [],
+                'today' => null,
+            ]);
+        }
         respond([
             'success' => true,
+            'linked' => true,
             'records' => currentRecords($pdo, $internId),
             'today' => todayRecord($pdo, $internId),
         ]);
     }
+
+    // Writing requires a linked intern (ends the response otherwise).
+    $internId = currentInternId($pdo);
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         respond(['success' => false, 'message' => 'Method not allowed.'], 405);
@@ -89,9 +104,13 @@ try {
         'records' => currentRecords($pdo, $internId),
         'today' => todayRecord($pdo, $internId),
     ]);
+} catch (ConfigException $error) {
+    // A missing env var - let the front controller name it (SERVER_MISCONFIGURED).
+    throw $error;
 } catch (Throwable $error) {
+    error_log('[attendance-api] attendance: ' . $error);
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    respond(['success' => false, 'message' => 'Database unavailable. Check the DB_* settings and that database/schema.mysql.sql has been applied.'], 500);
+    respond(['success' => false, 'message' => 'Attendance service is temporarily unavailable.'], 502);
 }

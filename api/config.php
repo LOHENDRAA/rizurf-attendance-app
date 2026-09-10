@@ -240,70 +240,93 @@ function internIdByEmail(string $email): ?string
 //   - dev     : DEV_ALLOW_NO_AUTH. Uses DEV_GATEWAY_SUB or DEV_INTERN_REF.
 // Every query downstream is already keyed by the id this returns.
 // ----------------------------------------------------------------------------
-function currentInternId(PDO $pdo): string
+/**
+ * Soft resolution: ['id' => ?string, 'reason' => ?string].
+ * reason is null on success, else 'no_intern' (the signed-in person has no
+ * matching intern record) or 'needs_ref' (a service caller must pass one).
+ */
+function resolveInternId(PDO $pdo): array
 {
     $auth = $GLOBALS['auth'] ?? ['kind' => 'dev'];
 
     if ($auth['kind'] === 'token') {
         $explicit = trim((string) ($_GET['intern_id'] ?? ''));
-        if ($explicit !== '') {
-            if (!preg_match('/^[0-9a-f-]{36}$/i', $explicit)) {
-                respond(['success' => false, 'message' => 'intern_id must be a uuid.'], 422);
-            }
-            return $explicit;
+        if ($explicit !== '' && preg_match('/^[0-9a-f-]{36}$/i', $explicit)) {
+            return ['id' => $explicit, 'reason' => null];
         }
         $ref = trim((string) ($_GET['intern_ref'] ?? ''));
         if ($ref !== '') {
-            $internId = internIdByRef($ref);
-            if (!$internId) {
-                respond(['success' => false, 'message' => "No intern with ref_number \"$ref\"."], 422);
-            }
-            return $internId;
+            $id = internIdByRef($ref);
+            return $id ? ['id' => $id, 'reason' => null] : ['id' => null, 'reason' => 'no_intern'];
         }
-        respond(['success' => false, 'message' => 'A service caller must pass intern_id or intern_ref.'], 422);
+        return ['id' => null, 'reason' => 'needs_ref'];
     }
 
     if ($auth['kind'] === 'session') {
-        $sub = (string) ($auth['session']['sub'] ?? '');
-        return internIdForGatewaySub($pdo, $sub);
+        return internIdForGatewaySub($pdo, (string) ($auth['session']['sub'] ?? ''));
     }
 
+    // dev
     $gatewaySub = env('DEV_GATEWAY_SUB');
     if ($gatewaySub !== null && $gatewaySub !== '') {
         return internIdForGatewaySub($pdo, $gatewaySub);
     }
-
-    $ref = env('DEV_INTERN_REF', 'INT-0007');
-    $internId = internIdByRef($ref);
-    if (!$internId) {
-        respond(['success' => false, 'message' => "No intern in the Intern Database with ref_number \"$ref\". Set DEV_INTERN_REF."], 500);
-    }
-    return $internId;
+    $id = internIdByRef((string) env('DEV_INTERN_REF', 'INT-0007'));
+    return $id ? ['id' => $id, 'reason' => null] : ['id' => null, 'reason' => 'no_intern'];
 }
 
 /**
- * The intern id for a gateway identity, from app_identities. If it is not
- * linked yet, resolve it from the Intern Database by email and write it back
- * ("whatever email the gateway signs in with auto-syncs to this app").
+ * Strict resolution for the write paths - the person MUST be a linked intern.
+ * Ends the response with a clear error otherwise (409, not a 500).
  */
-function internIdForGatewaySub(PDO $pdo, string $gatewaySub): string
+function currentInternId(PDO $pdo): string
+{
+    ['id' => $id, 'reason' => $reason] = resolveInternId($pdo);
+    if ($id !== null) {
+        return $id;
+    }
+    respond(['success' => false, 'linked' => false, 'message' => $reason === 'needs_ref'
+        ? 'A service caller must pass intern_id or intern_ref.'
+        : 'Your Rizurf account is not linked to an intern record.'], 409);
+}
+
+/**
+ * The intern id for a gateway identity, from app_identities. If not linked yet,
+ * resolve it from the Intern Database by email and write it back ("whatever
+ * email the gateway signs in with auto-syncs to this app"). Returns the soft
+ * ['id', 'reason'] shape - a person who is simply not an intern is not an error.
+ */
+function internIdForGatewaySub(PDO $pdo, string $gatewaySub): array
 {
     $statement = $pdo->prepare('SELECT intern_id, email_address FROM app_identities WHERE gateway_sub = ?');
     $statement->execute([$gatewaySub]);
     $row = $statement->fetch();
     if (!$row) {
-        respond(['success' => false, 'message' => "No app_identities row for \"$gatewaySub\"."], 500);
+        // upsertAppIdentity() runs before this on every authed request, so a
+        // missing row means the sign-in path is broken, not a normal state.
+        return ['id' => null, 'reason' => 'no_intern'];
     }
     if ($row['intern_id']) {
-        return (string) $row['intern_id'];
+        return ['id' => (string) $row['intern_id'], 'reason' => null];
     }
     $internId = internIdByEmail((string) $row['email_address']);
     if (!$internId) {
-        respond(['success' => false, 'message' => "No intern in the Intern Database with email {$row['email_address']}."], 500);
+        return ['id' => null, 'reason' => 'no_intern'];
     }
     $pdo->prepare('UPDATE app_identities SET intern_id = ?, intern_synced_at = now() WHERE gateway_sub = ?')
         ->execute([$internId, $gatewaySub]);
-    return $internId;
+    return ['id' => $internId, 'reason' => null];
+}
+
+/** The full Intern Database record for the current person, or null if their
+ *  account is not linked to one. */
+function currentInternRecord(PDO $pdo): ?array
+{
+    ['id' => $id] = resolveInternId($pdo);
+    if ($id === null) {
+        return null;
+    }
+    return internDirectory()[$id] ?? null;
 }
 
 /**

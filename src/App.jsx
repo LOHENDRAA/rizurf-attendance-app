@@ -1,14 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Bell, CalendarDays, Check, ChevronRight, Clock3, Compass, Download, FileScan,
-  FileText, Home, LogOut, MapPin, QrCode, ScanLine, Settings,
+  FileText, Home, MapPin, QrCode, ScanLine, Settings,
   ShieldCheck, UserRound, X,
 } from 'lucide-react'
 import { Html5Qrcode } from 'html5-qrcode'
 import './App.css'
 
-const OFFICE_ADDRESS = 'First Floor, 28-1, Jln 1/116B, Sri Desa Entrepreneur Park'
+const OFFICE_ADDRESS_FALLBACK = 'First Floor, 28-1, Jln 1/116B, Sri Desa Entrepreneur Park'
 const QR_PAYLOAD = 'Rizurf_Attandance'
+
+function initialsOf(name) {
+  return (name || '').trim().split(/\s+/).map((w) => w[0] || '').join('').slice(0, 2).toUpperCase() || 'RZ'
+}
+
+function formatDay(value) {
+  const d = new Date(`${value}T00:00:00`)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+}
 
 function formatTime(date) {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -30,6 +39,7 @@ function App() {
   const [leaveForm, setLeaveForm] = useState({ leaveDate: '', category: 'Medical Leave/MC', notes: '', attachmentName: '' })
   const [profileOpen, setProfileOpen] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(true)
+  const [me, setMe] = useState(null)
   const locationRef = useRef(null)
   const scannerRef = useRef(null)
   const scanHandledRef = useRef(false)
@@ -39,20 +49,27 @@ function App() {
   const showNotice = (type, message) => setNotice({ type, message })
 
   useEffect(() => {
+    fetch('./api/me.php')
+      .then((response) => response.json())
+      .then((data) => { if (!data.error) setMe(data) })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     fetch('./api/attendance.php')
       .then((response) => response.json())
       .then((data) => {
-        if (!data.success) throw new Error(data.message)
-        setHistory(data.records)
-        setToday(data.today)
+        if (!data.success) throw new Error(data.message || data.error?.message || 'Could not load your attendance.')
+        setHistory(data.records || [])
+        setToday(data.today || null)
       })
-      .catch(() => showNotice('error', 'Could not load attendance history from MySQL.'))
+      .catch((error) => showNotice('error', error.message || 'Could not load your attendance history.'))
   }, [])
 
   useEffect(() => {
     fetch('./api/leave.php')
       .then((response) => response.json())
-      .then((data) => { if (data.success) setLeaveRequests(data.requests) })
+      .then((data) => { if (data.success) setLeaveRequests(data.requests || []) })
       .catch(() => {})
   }, [])
 
@@ -223,12 +240,19 @@ function App() {
       .catch((error) => showNotice('error', error.message || 'Could not submit request.'))
   }
 
+  const intern = me?.intern || null
+  const notLinked = Boolean(me && me.linked === false)
+  const displayName = intern ? `${intern.first_name} ${intern.last_name}` : (me?.name || 'Intern')
+  const firstName = (intern?.first_name || me?.name || 'there').split(' ')[0]
+  const initials = intern ? initialsOf(`${intern.first_name} ${intern.last_name}`) : initialsOf(me?.name)
+  const officeAddress = me?.office?.address || OFFICE_ADDRESS_FALLBACK
+
   const workedDays = history.filter((entry) => entry.clockIn).length
   const dailyRate = 50
   const monthlyTarget = 22 * dailyRate
   const estimatedPayout = workedDays * dailyRate
-  const internshipStart = new Date('2026-08-03T00:00:00')
-  const internshipEnd = new Date('2026-11-27T00:00:00')
+  const internshipStart = new Date(`${intern?.internship_start_date || '2026-08-03'}T00:00:00`)
+  const internshipEnd = new Date(`${intern?.internship_end_date || '2026-11-27'}T00:00:00`)
   const totalInternshipDays = Math.max(1, Math.ceil((internshipEnd - internshipStart) / 86400000))
   const completedInternshipDays = Math.min(totalInternshipDays, Math.max(0, Math.ceil((new Date() - internshipStart) / 86400000)))
   const timelinePercent = Math.round((completedInternshipDays / totalInternshipDays) * 100)
@@ -244,16 +268,17 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="breadcrumbs"><span>Attendance console</span><b>/</b><strong>Dashboard</strong></div>
-        <div className="topbar-actions"><span className="system-status"><i></i> All systems operational</span><button className="icon-button" aria-label="Notifications"><Bell size={18} /></button><button className="profile-chip" aria-label="Open profile" onClick={() => selectTab('profile')}><span className="avatar">AM</span><span className="profile-name">Alex Morgan</span><ChevronRight size={15} /></button></div>
+        <div className="topbar-actions"><span className="system-status"><i></i> All systems operational</span><button className="icon-button" aria-label="Notifications"><Bell size={18} /></button><button className="profile-chip" aria-label="Open profile" onClick={() => selectTab('profile')}><span className="avatar">{initials}</span><span className="profile-name">{displayName}</span><ChevronRight size={15} /></button></div>
       </header>
 
       <main id="overview" className={`tab-content ${activeTab}-tab`}>
         {activeTab === 'holidays' && <section className="tab-panel holidays-panel"><div className="tab-heading"><p className="eyebrow">TIME OFF</p><h1>Upcoming holidays</h1><p>Plan your internship days around public holidays and team off-days.</p></div><div className="holiday-list">{upcomingHolidays.map((holiday) => <article className="holiday-row" key={holiday.title}><span className="holiday-date"><CalendarDays size={18} /><strong>{holiday.date}</strong></span><span><strong>{holiday.title}</strong><small>{holiday.type}</small></span><ChevronRight size={17} /></article>)}</div><article className="allowance-panel"><div><p className="eyebrow">INTERNSHIP LEAVE</p><h2>Remaining allowance</h2><p>2 of 5 leave days remaining for your internship period.</p></div><strong>2 <small>/ 5 days</small></strong><div className="progress"><span style={{ width: '60%' }}></span></div></article></section>}
         {activeTab === 'profile' && <section className="tab-panel profile-preview"><div className="tab-heading"><p className="eyebrow">YOUR DETAILS</p><h1>Intern profile</h1><p>Credentials, leave requests, and app preferences.</p></div><button className="primary-button" onClick={() => setProfileOpen(true)}><UserRound size={18} /> Open profile</button><button className="secondary-action profile-leave-button" onClick={() => setModal('leave')}><FileText size={17} /> Submit MC / leave</button></section>}
-        <section className="welcome-row"><div><p className="eyebrow">{formatDate(new Date())}</p><h1>Good morning, Alex</h1><p className="subtitle">Record your workday in a few seconds.</p></div><div className="location-pill"><span className="live-dot"></span><MapPin size={15} /> Sri Desa Entrepreneur Park</div></section>
+        <section className="welcome-row"><div><p className="eyebrow">{formatDate(new Date())}</p><h1>Good morning, {firstName}</h1><p className="subtitle">Record your workday in a few seconds.</p></div><div className="location-pill"><span className="live-dot"></span><MapPin size={15} /> {intern?.department_id ? `Dept ${intern.department_id}` : 'Rizurf'}</div></section>
+        {notLinked && <div className="notice error" role="status"><X size={17} />Your Rizurf account{me?.email ? ` (${me.email})` : ''} isn't linked to an intern record yet. Attendance is read-only until an admin adds you in the Intern Database.</div>}
         {notice && <div className={`notice ${notice.type}`} role="status">{notice.type === 'success' ? <Check size={17} /> : <X size={17} />}{notice.message}<button aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={15} /></button></div>}
 
-        <section className="attendance-hero"><div className="hero-copy"><p className="eyebrow">TODAY'S ATTENDANCE</p><h2>{isClockedIn ? 'You are clocked in' : today?.clockOut ? 'Workday complete' : 'Ready to clock in?'}</h2><p>{isClockedIn ? `Started at ${today.clockIn} via ${today.mode}. Clock out when you finish.` : today?.clockOut ? `Clocked out at ${today.clockOut} via ${today.clockOutMode || today.mode}.` : 'Choose Office if you are at work, or Hybrid if you are working away.'}</p><div className="attendance-actions"><button className={today?.clockOut ? 'primary-button checked-in' : 'primary-button'} onClick={openAttendance} disabled={Boolean(today?.clockOut)}>{today?.clockOut ? <><Check size={18} /> Attendance complete</> : <><Clock3 size={18} /> Clock {action}</>}</button><button className="secondary-action" onClick={() => setModal('leave')}><FileText size={17} /> MC / Leave</button></div><span className="location-note"><ShieldCheck size={14} /> Office location within 100m · Mobile data supported</span></div><div className="hero-location"><div className="location-orbit"><MapPin size={35} /></div><strong>Office verification</strong><span>100m radius from the office</span><small>{OFFICE_ADDRESS}</small></div></section>
+        <section className="attendance-hero"><div className="hero-copy"><p className="eyebrow">TODAY'S ATTENDANCE</p><h2>{isClockedIn ? 'You are clocked in' : today?.clockOut ? 'Workday complete' : 'Ready to clock in?'}</h2><p>{isClockedIn ? `Started at ${today.clockIn} via ${today.mode}. Clock out when you finish.` : today?.clockOut ? `Clocked out at ${today.clockOut} via ${today.clockOutMode || today.mode}.` : 'Choose Office if you are at work, or Hybrid if you are working away.'}</p><div className="attendance-actions"><button className={today?.clockOut ? 'primary-button checked-in' : 'primary-button'} onClick={openAttendance} disabled={Boolean(today?.clockOut)}>{today?.clockOut ? <><Check size={18} /> Attendance complete</> : <><Clock3 size={18} /> Clock {action}</>}</button><button className="secondary-action" onClick={() => setModal('leave')}><FileText size={17} /> MC / Leave</button></div><span className="location-note"><ShieldCheck size={14} /> Office location within 100m · Mobile data supported</span></div><div className="hero-location"><div className="location-orbit"><MapPin size={35} /></div><strong>Office verification</strong><span>100m radius from the office</span><small>{officeAddress}</small></div></section>
 
         <section className="quick-grid"><article className="metric-card accent-card"><div className="metric-icon"><Clock3 size={19} /></div><div><p>Late arrivals</p><strong>{history.filter((entry) => entry.status === 'Late').length} <small>times</small></strong><em>This month</em></div></article><article className="metric-card"><div className="metric-icon pale"><Clock3 size={19} /></div><div><p>Today</p><strong>{today?.clockIn || '—'} <small>{today?.clockOut ? `to ${today.clockOut}` : '/ pending'}</small></strong><em>{today?.mode || 'No attendance recorded yet'}</em></div></article><article className="metric-card allowance-card"><div className="metric-icon"><span>RM</span></div><div><p>Estimated payout</p><strong>RM {estimatedPayout.toLocaleString()} <small>/ RM {monthlyTarget.toLocaleString()}</small></strong><div className="progress"><span style={{ width: `${Math.min(100, (estimatedPayout / monthlyTarget) * 100)}%` }}></span></div><em>RM {dailyRate} daily rate · {workedDays} days worked</em></div></article><article className="metric-card timeline-card"><div className="metric-icon yellow"><Compass size={19} /></div><div><p>Internship timeline</p><strong>{completedInternshipDays} <small>/ {totalInternshipDays} days</small></strong><div className="progress"><span style={{ width: `${timelinePercent}%` }}></span></div><em>Week {Math.ceil(completedInternshipDays / 7)} of {Math.ceil(totalInternshipDays / 7)}</em></div></article></section>
 
@@ -265,7 +290,7 @@ function App() {
 
       {modal && modal !== 'leave' && <div className="modal-backdrop" role="presentation" onClick={(event) => event.target === event.currentTarget && setModal(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="attendance-modal-title"><button className="modal-close" aria-label="Close" onClick={() => setModal(null)}><X size={18} /></button>{modal === 'mode' ? <><div className="modal-icon"><Clock3 size={22} /></div><p className="eyebrow">CLOCK {action.toUpperCase()}</p><h2 id="attendance-modal-title">How are you working today?</h2><p className="modal-subtitle">We will verify your attendance based on where you are.</p><div className="mode-options"><button className="mode-option" onClick={() => chooseMode('Office')}><span className="mode-icon office"><QrCode size={21} /></span><span><strong>At the office</strong><small>Scan QR and verify within 100m</small></span><ChevronRight size={17} /></button><button className="mode-option" onClick={() => chooseMode('Hybrid')}><span className="mode-icon hybrid"><MapPin size={21} /></span><span><strong>Hybrid / away</strong><small>Clock {action} without office QR</small></span><ChevronRight size={17} /></button></div></> : <><div className="modal-icon"><QrCode size={22} /></div><p className="eyebrow">OFFICE QR VERIFICATION</p><h2 id="attendance-modal-title">Scan the office QR</h2><p className="modal-subtitle">Scan the QR code provided by Rizurf, then stay within 100m while location is checked.</p><div id="qr-reader" className="qr-reader"></div>{scanStatus && <p className="scanner-status">{scanStatus}</p>}{scannerError && <p className="scanner-error">{scannerError}</p>}<label className="upload-qr"><FileScan size={16} /> Use a QR image<input type="file" accept="image/*" capture="environment" onChange={scanQrImage} /></label><button className="text-button cancel-scan" onClick={() => setModal(null)}>Cancel scan</button></>}</div></div>}
       {modal === 'leave' && <div className="modal-backdrop" role="presentation"><form className="modal leave-modal" onSubmit={submitLeave}><button type="button" className="modal-close" aria-label="Close" onClick={() => setModal(null)}><X size={18} /></button><div className="modal-icon"><FileText size={22} /></div><p className="eyebrow">REQUEST TIME OFF</p><h2 id="leave-title">MC & leave submission</h2><p className="modal-subtitle">Submit a request for your supervisor to review.</p><label className="form-label">Date<input required type="date" value={leaveForm.leaveDate} onChange={(event) => setLeaveForm({ ...leaveForm, leaveDate: event.target.value })} /></label><label className="form-label">Category<select value={leaveForm.category} onChange={(event) => setLeaveForm({ ...leaveForm, category: event.target.value })}><option>Medical Leave/MC</option><option>Emergency Leave</option><option>University Event</option></select></label><label className="form-label">Slip or supporting file<input type="file" accept="image/*,.pdf" onChange={(event) => setLeaveForm({ ...leaveForm, attachmentName: event.target.files?.[0]?.name || '' })} /></label><label className="form-label">Notes<textarea rows="3" value={leaveForm.notes} onChange={(event) => setLeaveForm({ ...leaveForm, notes: event.target.value })} placeholder="Optional note for your supervisor" /></label><button className="primary-button form-submit" type="submit">Submit for approval</button><div className="request-statuses"><strong>Approval status</strong>{leaveRequests.slice(0, 3).map((request) => <span key={request.id}><b className={`status-dot ${request.status.toLowerCase()}`}></b>{request.leave_date || request.leaveDate} · {request.category} · {request.status}</span>)}</div></form></div>}
-      {profileOpen && <div className="profile-backdrop" onClick={(event) => event.target === event.currentTarget && setProfileOpen(false)}><aside className="profile-drawer"><button className="drawer-close" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={19} /></button><div className="drawer-avatar">AM</div><p className="eyebrow">INTERN PROFILE</p><h2>Alex Morgan</h2><div className="credential-list"><div><span>Full legal name</span><strong>Alex Morgan</strong></div><div><span>Role / title</span><strong>Marketing & Community Manager Intern</strong></div><div><span>Company</span><strong>Rizurf Realty</strong></div><div><span>Internship duration</span><strong>03 Aug 2026 – 27 Nov 2026</strong></div></div><div className="drawer-setting"><span><Bell size={18} /> Notifications</span><button className={notificationsEnabled ? 'toggle is-on' : 'toggle'} aria-pressed={notificationsEnabled} onClick={() => setNotificationsEnabled(!notificationsEnabled)}><i></i></button></div><button className="drawer-setting drawer-action"><Settings size={18} /> Account settings</button><button className="logout-button" onClick={() => showNotice('success', 'You have been logged out of this demo.') }><LogOut size={18} /> Log out</button></aside></div>}
+      {profileOpen && <div className="profile-backdrop" onClick={(event) => event.target === event.currentTarget && setProfileOpen(false)}><aside className="profile-drawer"><button className="drawer-close" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={19} /></button><div className="drawer-avatar">{initials}</div><p className="eyebrow">INTERN PROFILE</p><h2>{displayName}</h2><div className="credential-list"><div><span>Full legal name</span><strong>{displayName}</strong></div><div><span>Reference</span><strong>{intern?.ref_number || '—'}</strong></div><div><span>Rizurf account</span><strong>{me?.email || '—'}</strong></div><div><span>Arrangement</span><strong>{intern ? `${intern.mode} · ${intern.allowance}` : '—'}</strong></div><div><span>Internship duration</span><strong>{intern ? `${formatDay(intern.internship_start_date)} – ${formatDay(intern.internship_end_date)}` : '—'}</strong></div></div><div className="drawer-setting"><span><Bell size={18} /> Notifications</span><button className={notificationsEnabled ? 'toggle is-on' : 'toggle'} aria-pressed={notificationsEnabled} onClick={() => setNotificationsEnabled(!notificationsEnabled)}><i></i></button></div><button className="drawer-setting drawer-action"><Settings size={18} /> Account settings</button><p className="drawer-note">Signed in through the Rizurf gateway. Sign out there.</p></aside></div>}
     </div>
   )
 }

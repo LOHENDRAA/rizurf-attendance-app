@@ -4,9 +4,12 @@ require_once __DIR__ . '/config.php';
 
 try {
     $pdo = database();
-    $internId = currentInternId($pdo);
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        ['id' => $internId] = resolveInternId($pdo);
+        if ($internId === null) {
+            respond(['success' => true, 'linked' => false, 'requests' => []]);
+        }
         $statement = $pdo->prepare(
             'SELECT id, leave_date, category, attachment_name, notes, status, created_at
                FROM leave_requests
@@ -15,8 +18,10 @@ try {
               LIMIT 30'
         );
         $statement->execute([$internId]);
-        respond(['success' => true, 'requests' => $statement->fetchAll()]);
+        respond(['success' => true, 'linked' => true, 'requests' => $statement->fetchAll()]);
     }
+
+    $internId = currentInternId($pdo);
 
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         respond(['success' => false, 'message' => 'Method not allowed.'], 405);
@@ -40,6 +45,9 @@ try {
     );
     $statement->execute([$internId, $leaveDate, $category, $attachmentName, $notes]);
     respond(['success' => true, 'message' => 'Request submitted for approval.']);
+} catch (ConfigException $error) {
+    throw $error;
 } catch (Throwable $error) {
-    respond(['success' => false, 'message' => 'Leave service unavailable. Check the DB_* settings and that database/schema.mysql.sql has been applied.'], 500);
+    error_log('[attendance-api] leave: ' . $error);
+    respond(['success' => false, 'message' => 'Leave service is temporarily unavailable.'], 502);
 }

@@ -210,24 +210,49 @@ function authenticate(): ?array
     return null;
 }
 
-/** GET /api/me - who the current request is, for the SPA to render. */
+/**
+ * GET /api/me - the signed-in person plus their resolved Intern Database
+ * record, for the SPA to render. Never errors on "not an intern" - it reports
+ * linked:false and why.
+ */
 function currentIdentity(): array
 {
     $auth = $GLOBALS['auth'] ?? ['kind' => 'dev'];
     $session = $auth['session'] ?? [];
+
     $internId = null;
+    $intern = null;
+    $reason = null;
     try {
-        $internId = currentInternId(database());
-    } catch (Throwable) {
-        // A supervisor / hr user with no intern record - fine.
+        $pdo = database();
+        ['id' => $internId, 'reason' => $reason] = resolveInternId($pdo);
+        if ($internId !== null) {
+            $intern = internDirectory()[$internId] ?? null;
+        }
+    } catch (ConfigException $e) {
+        throw $e; // let the handler name the missing env var
+    } catch (Throwable $e) {
+        error_log('[attendance-api] /api/me: ' . $e);
+        $reason = 'lookup_failed';
     }
+
     return [
         'sub' => $session['sub'] ?? null,
         'email' => $session['email'] ?? null,
         'name' => $session['name'] ?? null,
         'role' => $session['role'] ?? null,
         'intern_id' => $internId,
+        'intern' => $intern,
+        'linked' => $intern !== null,
+        'reason' => $intern !== null ? null : ($reason ?: 'no_intern'),
         'dev' => $auth['kind'] === 'dev',
+        'office' => [
+            'address' => (string) env('OFFICE_ADDRESS', ''),
+            'qr' => officeQr(),
+            'latitude' => officeLatitude(),
+            'longitude' => officeLongitude(),
+            'radius_m' => officeRadiusMeters(),
+        ],
     ];
 }
 
