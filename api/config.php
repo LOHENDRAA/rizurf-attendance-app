@@ -140,10 +140,20 @@ function database(): PDO
 // Intern Database service (SS-26 - program-to-program via client_credentials)
 // ----------------------------------------------------------------------------
 
+/** The Intern Database (or the gateway leg to it) could not be reached /
+ *  authenticated. `$detail` is safe to surface - upstream status + error code,
+ *  never a secret. */
+class InternDbException extends RuntimeException
+{
+    public function __construct(public string $detail)
+    {
+        parent::__construct($detail);
+    }
+}
+
 /**
  * A scoped access token for the Intern Database, cached in-process until it
- * expires (roughly an hour). Fetched from the gateway with the API client
- * secret from the environment.
+ * expires. Fetched from the gateway with the API client secret (SS-26).
  */
 function internDbToken(): string
 {
@@ -164,7 +174,17 @@ function internDbToken(): string
     ], ['grant_type' => 'client_credentials', 'audience' => $audience, 'scope' => 'intern:read']);
 
     if ($status !== 200 || !isset($body['access_token'])) {
-        respond(['success' => false, 'message' => 'Could not authenticate with the Intern Database service.'], 502);
+        $code = '';
+        if (is_array($body)) {
+            $raw = $body['error'] ?? $body['message'] ?? $body['error_description'] ?? '';
+            if (is_array($raw)) {
+                $raw = $raw['code'] ?? $raw['message'] ?? '';
+            }
+            $code = is_string($raw) ? $raw : '';
+        }
+        $hint = $code !== '' ? " ($code)" : '';
+        error_log("[attendance-api] intern-db token: gateway /oauth/token -> $status$hint");
+        throw new InternDbException("gateway /oauth/token returned $status$hint");
     }
 
     $token = $body['access_token'];
@@ -181,7 +201,8 @@ function internDbGet(string $path): array
         'Accept: application/json',
     ]);
     if ($status !== 200) {
-        respond(['success' => false, 'message' => "Intern Database returned $status for $path."], 502);
+        error_log("[attendance-api] intern-db GET $path -> $status");
+        throw new InternDbException("Intern Database GET $path returned $status");
     }
     return $body;
 }
@@ -241,51 +262,60 @@ function internIdByEmail(string $email): ?string
 // Every query downstream is already keyed by the id this returns.
 // ----------------------------------------------------------------------------
 /**
- * Soft resolution: ['id' => ?string, 'reason' => ?string].
- * reason is null on success, else 'no_intern' (the signed-in person has no
- * matching intern record) or 'needs_ref' (a service caller must pass one).
+ * Soft resolution: ['id' => ?string, 'reason' => ?string, 'detail' => ?string].
+ * reason: null on success, 'no_intern' (no matching intern record),
+ * 'needs_ref' (a service caller must pass one), or 'lookup_failed' (the Intern
+ * Database could not be reached / authenticated - 'detail' says how).
  */
 function resolveInternId(PDO $pdo): array
 {
     $auth = $GLOBALS['auth'] ?? ['kind' => 'dev'];
 
-    if ($auth['kind'] === 'token') {
-        $explicit = trim((string) ($_GET['intern_id'] ?? ''));
-        if ($explicit !== '' && preg_match('/^[0-9a-f-]{36}$/i', $explicit)) {
-            return ['id' => $explicit, 'reason' => null];
+    try {
+        if ($auth['kind'] === 'token') {
+            $explicit = trim((string) ($_GET['intern_id'] ?? ''));
+            if ($explicit !== '' && preg_match('/^[0-9a-f-]{36}$/i', $explicit)) {
+                return ['id' => $explicit, 'reason' => null];
+            }
+            $ref = trim((string) ($_GET['intern_ref'] ?? ''));
+            if ($ref !== '') {
+                $id = internIdByRef($ref);
+                return $id ? ['id' => $id, 'reason' => null] : ['id' => null, 'reason' => 'no_intern'];
+            }
+            return ['id' => null, 'reason' => 'needs_ref'];
         }
-        $ref = trim((string) ($_GET['intern_ref'] ?? ''));
-        if ($ref !== '') {
-            $id = internIdByRef($ref);
-            return $id ? ['id' => $id, 'reason' => null] : ['id' => null, 'reason' => 'no_intern'];
+
+        if ($auth['kind'] === 'session') {
+            return internIdForGatewaySub($pdo, (string) ($auth['session']['sub'] ?? ''));
         }
-        return ['id' => null, 'reason' => 'needs_ref'];
-    }
 
-    if ($auth['kind'] === 'session') {
-        return internIdForGatewaySub($pdo, (string) ($auth['session']['sub'] ?? ''));
+        // dev
+        $gatewaySub = env('DEV_GATEWAY_SUB');
+        if ($gatewaySub !== null && $gatewaySub !== '') {
+            return internIdForGatewaySub($pdo, $gatewaySub);
+        }
+        $id = internIdByRef((string) env('DEV_INTERN_REF', 'INT-0007'));
+        return $id ? ['id' => $id, 'reason' => null] : ['id' => null, 'reason' => 'no_intern'];
+    } catch (InternDbException $e) {
+        return ['id' => null, 'reason' => 'lookup_failed', 'detail' => $e->detail];
     }
-
-    // dev
-    $gatewaySub = env('DEV_GATEWAY_SUB');
-    if ($gatewaySub !== null && $gatewaySub !== '') {
-        return internIdForGatewaySub($pdo, $gatewaySub);
-    }
-    $id = internIdByRef((string) env('DEV_INTERN_REF', 'INT-0007'));
-    return $id ? ['id' => $id, 'reason' => null] : ['id' => null, 'reason' => 'no_intern'];
 }
 
 /**
  * Strict resolution for the write paths - the person MUST be a linked intern.
- * Ends the response with a clear error otherwise (409, not a 500).
+ * Ends the response with a clear error otherwise (409 / 502, never a bare 500).
  */
 function currentInternId(PDO $pdo): string
 {
-    ['id' => $id, 'reason' => $reason] = resolveInternId($pdo);
-    if ($id !== null) {
-        return $id;
+    $resolved = resolveInternId($pdo);
+    if ($resolved['id'] !== null) {
+        return $resolved['id'];
     }
-    respond(['success' => false, 'linked' => false, 'message' => $reason === 'needs_ref'
+    if (($resolved['reason'] ?? null) === 'lookup_failed') {
+        respond(['success' => false, 'linked' => false,
+            'message' => 'The Intern Database is unavailable right now - try again shortly.'], 502);
+    }
+    respond(['success' => false, 'linked' => false, 'message' => ($resolved['reason'] ?? '') === 'needs_ref'
         ? 'A service caller must pass intern_id or intern_ref.'
         : 'Your Rizurf account is not linked to an intern record.'], 409);
 }
@@ -445,7 +475,7 @@ function httpJson(string $method, string $url, array $headers = [], ?array $json
     if ($raw === false) {
         $err = curl_error($ch);
         curl_close($ch);
-        respond(['success' => false, 'message' => "Upstream request failed: $err"], 502);
+        throw new RuntimeException("Upstream request failed: $err");
     }
     $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
     curl_close($ch);

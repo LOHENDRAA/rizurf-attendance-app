@@ -223,17 +223,25 @@ function currentIdentity(): array
     $internId = null;
     $intern = null;
     $reason = null;
+    $detail = null;
     try {
         $pdo = database();
-        ['id' => $internId, 'reason' => $reason] = resolveInternId($pdo);
+        $resolved = resolveInternId($pdo);
+        $internId = $resolved['id'];
+        $reason = $resolved['reason'] ?? null;
+        $detail = $resolved['detail'] ?? null;
         if ($internId !== null) {
             $intern = internDirectory()[$internId] ?? null;
         }
     } catch (ConfigException $e) {
         throw $e; // let the handler name the missing env var
+    } catch (InternDbException $e) {
+        $reason = 'lookup_failed';
+        $detail = $e->detail;
     } catch (Throwable $e) {
         error_log('[attendance-api] /api/me: ' . $e);
         $reason = 'lookup_failed';
+        $detail = 'unexpected error';
     }
 
     return [
@@ -245,6 +253,7 @@ function currentIdentity(): array
         'intern' => $intern,
         'linked' => $intern !== null,
         'reason' => $intern !== null ? null : ($reason ?: 'no_intern'),
+        'detail' => $intern !== null ? null : $detail,
         'dev' => $auth['kind'] === 'dev',
         'office' => [
             'address' => (string) env('OFFICE_ADDRESS', ''),
