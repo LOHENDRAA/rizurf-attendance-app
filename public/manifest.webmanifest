@@ -1,10 +1,10 @@
 {
-  "name": "Northstar Attendance",
-  "short_name": "Attendance",
-  "start_url": "./",
+  "name": "Rizurf Realty Attendance",
+  "short_name": "Rizurf Attendance",
+  "start_url": ".",
   "display": "standalone",
   "background_color": "#f6f8f5",
   "theme_color": "#f6f8f5",
-  "description": "Northstar employee attendance",
-  "icons": [{ "src": "./favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+  "description": "Rizurf Realty employee attendance",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
 }
