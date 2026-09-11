@@ -1,67 +1,165 @@
 <?php
 
-declare(strict_types=1);
-
-date_default_timezone_set('Asia/Kuala_Lumpur');
-
-const DB_HOST = '127.0.0.1';
-const DB_NAME = 'qr_system';
-const DB_USER = 'root';
-const DB_PASSWORD = '';
-const EMPLOYEE_ID = 'alex-morgan';
-const EMPLOYEE_NAME = 'Alex Morgan';
-const OFFICE_LATITUDE = 3.0862205788137413;
-const OFFICE_LONGITUDE = 101.69002156884324;
-const OFFICE_RADIUS_METERS = 100;
-const OFFICE_QR = 'Rizurf_Attandance';
-
-function database(): PDO
+/**
+ * Loads KEY=VALUE pairs from a .env file into getenv()/$_ENV. No external
+ * library -- this project doesn't have Composer set up, and this is the
+ * entire feature set a small local app needs. Values already set in the
+ * real environment are never overridden by the file.
+ */
+function loadEnv(string $path): void
 {
-    static $pdo = null;
-    if ($pdo === null) {
-        $pdo = new PDO(
-            'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4',
-            DB_USER,
-            DB_PASSWORD,
-            [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
-        );
+    if (!is_readable($path)) {
+        throw new RuntimeException("Missing .env file at $path -- copy .env.example to .env and fill in your values.");
     }
-    return $pdo;
+    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#')) {
+            continue;
+        }
+        [$key, $value] = array_pad(explode('=', $line, 2), 2, '');
+        $key = trim($key);
+        $value = trim($value);
+        if (strlen($value) >= 2 && (
+            ($value[0] === '"' && $value[-1] === '"') ||
+            ($value[0] === "'" && $value[-1] === "'")
+        )) {
+            $value = substr($value, 1, -1);
+        }
+        if ($key !== '' && getenv($key) === false) {
+            putenv("$key=$value");
+            $_ENV[$key] = $value;
+        }
+    }
 }
 
-function respond(array $payload, int $status = 200): never
+function env(string $key, $default = null)
 {
-    http_response_code($status);
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($payload);
+    $value = getenv($key);
+    return $value === false ? $default : $value;
+}
+
+loadEnv(dirname(__DIR__) . '/.env');
+
+// PHP's own default (whatever the host happens to be configured with -- this
+// XAMPP install's is Europe/Berlin) has nothing to do with where the office
+// actually is. Every date()/strtotime() call in this app -- attendance
+// timestamps, the on-time/late cutoff, reminder schedules, the lunch break
+// window -- must agree with the office's real clock, not the server host's.
+date_default_timezone_set(env('APP_TIMEZONE', 'Asia/Kuala_Lumpur'));
+
+// -- Loaded from .env -- see .env.example for the template ------------------
+define('DB_HOST', env('DB_HOST', '127.0.0.1'));
+define('DB_NAME', env('DB_NAME', 'qr_system'));
+define('DB_USER', env('DB_USER', 'root'));
+define('DB_PASS', env('DB_PASS', ''));
+
+// This is a single-employee demo app (no login system implemented yet),
+// so the "current" employee is read from .env. Replace with real values.
+define('EMPLOYEE_ID', (int) env('EMPLOYEE_ID', 1));
+define('EMPLOYEE_NAME', env('EMPLOYEE_NAME', 'Alex'));
+
+define('OFFICE_QR', env('OFFICE_QR', ''));
+define('OFFICE_LATITUDE', (float) env('OFFICE_LATITUDE', 0));
+define('OFFICE_LONGITUDE', (float) env('OFFICE_LONGITUDE', 0));
+define('OFFICE_RADIUS_METERS', (int) env('OFFICE_RADIUS_METERS', 100));
+
+// Web Push (VAPID) -- lets the server send real browser/OS notifications,
+// even when the app isn't open. VAPID_SUBJECT should be a mailto: address
+// or a URL identifying who's sending the push, per the Web Push spec.
+define('VAPID_PUBLIC_KEY', env('VAPID_PUBLIC_KEY', ''));
+define('VAPID_PRIVATE_KEY', env('VAPID_PRIVATE_KEY', ''));
+define('VAPID_SUBJECT', env('VAPID_SUBJECT', 'mailto:admin@example.com'));
+
+// Used only by send-reminders.php -- when to nudge about clocking in, and
+// how many minutes before shift end to nudge about clocking out.
+define('REMINDER_CLOCK_IN_DEADLINE', env('REMINDER_CLOCK_IN_DEADLINE', '09:10'));
+define('REMINDER_SHIFT_END', env('REMINDER_SHIFT_END', '18:00'));
+define('REMINDER_LEAD_MINUTES', (int) env('REMINDER_LEAD_MINUTES', 15));
+
+// The lunch break can only be started within this window. Ending it isn't
+// time-restricted -- a break started right at LUNCH_BREAK_END is expected to
+// run past it, which is exactly what break_overtime_seconds tracks.
+define('LUNCH_BREAK_START', env('LUNCH_BREAK_START', '13:00'));
+define('LUNCH_BREAK_END', env('LUNCH_BREAK_END', '14:00'));
+// ----------------------------------------------------------------------------
+
+header('Content-Type: application/json');
+header('Access-Control-Allow-Origin: http://localhost:5173');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
     exit;
 }
 
-function distanceInMeters(float $latitude, float $longitude): float
+function respond(array $data, int $code = 200): void
 {
-    $earthRadius = 6371000;
-    $latitudeDelta = deg2rad($latitude - OFFICE_LATITUDE);
-    $longitudeDelta = deg2rad($longitude - OFFICE_LONGITUDE);
-    $a = sin($latitudeDelta / 2) ** 2 + cos(deg2rad(OFFICE_LATITUDE)) * cos(deg2rad($latitude)) * sin($longitudeDelta / 2) ** 2;
-    return $earthRadius * 2 * atan2(sqrt($a), sqrt(1 - $a));
+    http_response_code($code);
+    echo json_encode($data);
+    exit;
 }
 
+function database(): PDO
+{
+    $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=utf8mb4';
+    $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+    return $pdo;
+}
+
+/**
+ * Haversine distance in metres from the configured office location.
+ */
+function distanceInMeters(float $latitude, float $longitude): float
+{
+    $earthRadius = 6371000; // metres
+    $latFrom = deg2rad(OFFICE_LATITUDE);
+    $latTo = deg2rad($latitude);
+    $latDelta = deg2rad($latitude - OFFICE_LATITUDE);
+    $lngDelta = deg2rad($longitude - OFFICE_LONGITUDE);
+
+    $a = sin($latDelta / 2) ** 2 + cos($latFrom) * cos($latTo) * sin($lngDelta / 2) ** 2;
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+    return $earthRadius * $c;
+}
+
+/**
+ * Recent attendance records for the current employee, most recent first.
+ */
+function currentRecords(PDO $pdo, int $limit = 30): array
+{
+    $statement = $pdo->prepare(
+        'SELECT * FROM attendance_records WHERE employee_id = ? ORDER BY attendance_date DESC LIMIT ?'
+    );
+    $statement->bindValue(1, EMPLOYEE_ID, PDO::PARAM_INT);
+    $statement->bindValue(2, $limit, PDO::PARAM_INT);
+    $statement->execute();
+
+    return array_map('formatRecord', $statement->fetchAll());
+}
+
+/**
+ * Shape a raw attendance_records row for the frontend.
+ */
 function formatRecord(array $record): array
 {
     return [
-        'id' => (string) $record['id'],
-        'date' => date('D, M d', strtotime($record['attendance_date'])),
-        'clockIn' => $record['clock_in'] ? date('h:i A', strtotime($record['clock_in'])) : '',
-        'clockOut' => $record['clock_out'] ? date('h:i A', strtotime($record['clock_out'])) : '',
-        'mode' => $record['clock_in_mode'] ?? 'Hybrid',
+        'id' => (int) $record['id'],
+        'date' => $record['attendance_date'],
+        'clockIn' => $record['clock_in'],
+        'clockInMode' => $record['clock_in_mode'],
+        'clockOut' => $record['clock_out'],
         'clockOutMode' => $record['clock_out_mode'],
-        'status' => !empty($record['approved_mc_id']) ? 'Excused (MC)' : ($record['status'] ?? 'On time'),
+        'status' => $record['status'],
+        'breakSeconds' => (int) ($record['break_seconds'] ?? 0),
+        'breakOvertimeSeconds' => (int) ($record['break_overtime_seconds'] ?? 0),
+        'breakActive' => !empty($record['break_started_at']),
+        // Needed client-side to tick a live "on break" timer -- breakSeconds
+        // above only reflects completed breaks, not the one in progress.
+        'breakStartedAt' => $record['break_started_at'],
     ];
-}
-
-function currentRecords(PDO $pdo): array
-{
-    $statement = $pdo->prepare("SELECT attendance_records.*, approved_mc.id AS approved_mc_id FROM attendance_records LEFT JOIN leave_requests approved_mc ON approved_mc.employee_id = attendance_records.employee_id AND approved_mc.leave_date = attendance_records.attendance_date AND approved_mc.category = 'Medical Leave/MC' AND approved_mc.status = 'Approved' WHERE attendance_records.employee_id = ? ORDER BY attendance_records.attendance_date DESC, attendance_records.id DESC LIMIT 30");
-    $statement->execute([EMPLOYEE_ID]);
-    return array_map('formatRecord', $statement->fetchAll());
 }

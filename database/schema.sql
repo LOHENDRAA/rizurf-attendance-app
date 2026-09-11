@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   clock_out_longitude DECIMAL(10, 7) NULL,
   clock_in_qr VARCHAR(100) NULL,
   clock_out_qr VARCHAR(100) NULL,
+  break_started_at DATETIME NULL,
+  break_seconds INT UNSIGNED NOT NULL DEFAULT 0,
+  break_overtime_seconds INT UNSIGNED NOT NULL DEFAULT 0,
   status ENUM('On time', 'Late', 'Excused (MC)') NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY one_record_per_employee_per_day (employee_id, attendance_date),
@@ -27,14 +30,45 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   employee_id VARCHAR(80) NOT NULL,
   employee_name VARCHAR(120) NOT NULL,
   leave_date DATE NOT NULL,
-  category ENUM('Medical Leave/MC', 'Emergency Leave', 'University Event') NOT NULL,
+  category ENUM('Medical Leave/MC', 'Emergency Leave', 'University Event', 'Other') NOT NULL,
+  reason VARCHAR(255) NULL,
   attachment_name VARCHAR(255) NULL,
   notes VARCHAR(500) NULL,
   status ENUM('Pending', 'Approved', 'Rejected') NOT NULL DEFAULT 'Pending',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   reviewed_at DATETIME NULL,
+  -- Set once a push has gone out for the current status, so the reminders
+  -- script (which just polls for Approved/Rejected rows) never re-notifies
+  -- for the same decision on its next run.
+  notified_at DATETIME NULL,
   INDEX leave_employee_date (employee_id, leave_date),
   INDEX leave_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  employee_id VARCHAR(80) NOT NULL,
+  endpoint VARCHAR(500) NOT NULL,
+  p256dh VARCHAR(255) NOT NULL,
+  auth VARCHAR(255) NOT NULL,
+  -- Per-device notification preferences. One row per subscribed device, so
+  -- each intern's own device remembers only the reminder types they asked
+  -- for; unrelated to other interns' subscriptions.
+  notify_clock_in TINYINT(1) NOT NULL DEFAULT 1,
+  notify_clock_out TINYINT(1) NOT NULL DEFAULT 1,
+  notify_leave_status TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY one_row_per_endpoint (endpoint(255)),
+  INDEX push_subscriptions_employee (employee_id)
+);
+
+CREATE TABLE IF NOT EXISTS reminders_sent (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  employee_id VARCHAR(80) NOT NULL,
+  reminder_type VARCHAR(40) NOT NULL,
+  reminder_date DATE NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY one_reminder_per_day (employee_id, reminder_type, reminder_date)
 );
 
 INSERT INTO attendance_records
