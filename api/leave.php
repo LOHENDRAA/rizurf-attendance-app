@@ -6,8 +6,9 @@ try {
     $pdo = database();
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $employee = resolveEmployee($pdo, $_GET['employeeId'] ?? null);
         $statement = $pdo->prepare('SELECT * FROM leave_requests WHERE employee_id = ? ORDER BY created_at DESC LIMIT 50');
-        $statement->execute([EMPLOYEE_ID]);
+        $statement->execute([$employee['id']]);
         $requests = array_map('formatLeaveRequest', $statement->fetchAll());
         respond(['success' => true, 'requests' => $requests]);
     }
@@ -17,6 +18,7 @@ try {
     }
 
     $input = json_decode(file_get_contents('php://input'), true) ?? [];
+    $employee = resolveEmployee($pdo, $input['employeeId'] ?? null);
     $leaveDate = trim($input['leaveDate'] ?? '');
     $category = trim($input['category'] ?? '');
     $reason = trim($input['reason'] ?? '');
@@ -32,9 +34,9 @@ try {
     }
 
     $insert = $pdo->prepare(
-        'INSERT INTO leave_requests (employee_id, leave_date, category, reason, notes, attachment_name, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO leave_requests (employee_id, employee_name, leave_date, category, reason, notes, attachment_name, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
     );
-    $insert->execute([EMPLOYEE_ID, $leaveDate, $category, $reason ?: null, $notes ?: null, $attachmentName ?: null, 'Pending']);
+    $insert->execute([$employee['id'], $employee['name'], $leaveDate, $category, $reason ?: null, $notes ?: null, $attachmentName ?: null, 'Pending']);
 
     respond(['success' => true, 'message' => 'Leave request submitted for approval.']);
 } catch (Throwable $error) {

@@ -19,10 +19,10 @@ use Minishlink\WebPush\Subscription;
  * type turned on receive it. Always one of our own two hardcoded column
  * names, never user input.
  */
-function sendPush(WebPush $webPush, PDO $pdo, string $title, string $body, string $preferenceColumn): void
+function sendPush(WebPush $webPush, PDO $pdo, string $employeeId, string $title, string $body, string $preferenceColumn): void
 {
     $statement = $pdo->prepare("SELECT * FROM push_subscriptions WHERE employee_id = ? AND $preferenceColumn = 1");
-    $statement->execute([EMPLOYEE_ID]);
+    $statement->execute([$employeeId]);
     $subscriptions = $statement->fetchAll();
     $payload = json_encode(['title' => $title, 'body' => $body]);
 
@@ -51,17 +51,17 @@ function sendPush(WebPush $webPush, PDO $pdo, string $title, string $body, strin
     }
 }
 
-function alreadySentToday(PDO $pdo, string $type): bool
+function alreadySentToday(PDO $pdo, string $employeeId, string $type): bool
 {
     $statement = $pdo->prepare('SELECT 1 FROM reminders_sent WHERE employee_id = ? AND reminder_type = ? AND reminder_date = ?');
-    $statement->execute([EMPLOYEE_ID, $type, date('Y-m-d')]);
+    $statement->execute([$employeeId, $type, date('Y-m-d')]);
     return (bool) $statement->fetchColumn();
 }
 
-function markSent(PDO $pdo, string $type): void
+function markSent(PDO $pdo, string $employeeId, string $type): void
 {
     $pdo->prepare('INSERT IGNORE INTO reminders_sent (employee_id, reminder_type, reminder_date) VALUES (?, ?, ?)')
-        ->execute([EMPLOYEE_ID, $type, date('Y-m-d')]);
+        ->execute([$employeeId, $type, date('Y-m-d')]);
 }
 
 $pdo = database();
@@ -76,39 +76,47 @@ $webPush = new WebPush([
 $now = new DateTime();
 $today = $now->format('Y-m-d');
 
-$todayStatement = $pdo->prepare('SELECT * FROM attendance_records WHERE employee_id = ? AND attendance_date = ? LIMIT 1');
-$todayStatement->execute([EMPLOYEE_ID, $today]);
-$todayRecord = $todayStatement->fetch();
+// Every employee's reminders are independent -- one employee's malformed
+// data or a push failure (already handled inside sendPush) must not skip
+// the rest.
+$employees = $pdo->query('SELECT id FROM employees')->fetchAll();
+foreach ($employees as $employeeRow) {
+    $employeeId = $employeeRow['id'];
 
-// Clock-in reminder: past the deadline, nothing recorded yet today.
-$clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . REMINDER_CLOCK_IN_DEADLINE);
-if ($now >= $clockInDeadline && !$todayRecord && !alreadySentToday($pdo, 'clock_in')) {
-    sendPush($webPush, $pdo, 'Don\'t forget to clock in', 'You haven\'t clocked in yet today.', 'notify_clock_in');
-    markSent($pdo, 'clock_in');
-}
+    $todayStatement = $pdo->prepare('SELECT * FROM attendance_records WHERE employee_id = ? AND attendance_date = ? LIMIT 1');
+    $todayStatement->execute([$employeeId, $today]);
+    $todayRecord = $todayStatement->fetch();
 
-// Clock-out reminder: within REMINDER_LEAD_MINUTES of shift end, clocked
-// in but never clocked out.
-$shiftEnd = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . REMINDER_SHIFT_END);
-$reminderWindowStart = (clone $shiftEnd)->modify('-' . REMINDER_LEAD_MINUTES . ' minutes');
-if ($now >= $reminderWindowStart && $now <= $shiftEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out'] && !alreadySentToday($pdo, 'clock_out')) {
-    sendPush($webPush, $pdo, 'Shift ending soon', 'Remember to clock out before you leave.', 'notify_clock_out');
-    markSent($pdo, 'clock_out');
-}
+    // Clock-in reminder: past the deadline, nothing recorded yet today.
+    $clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . REMINDER_CLOCK_IN_DEADLINE);
+    if ($now >= $clockInDeadline && !$todayRecord && !alreadySentToday($pdo, $employeeId, 'clock_in')) {
+        sendPush($webPush, $pdo, $employeeId, 'Don\'t forget to clock in', 'You haven\'t clocked in yet today.', 'notify_clock_in');
+        markSent($pdo, $employeeId, 'clock_in');
+    }
 
-// Leave/MC approval updates: a supervisor changes status directly in the
-// database (this app has no admin UI), so this is the only place that
-// notices it happened -- pick up any decision that hasn't been pushed yet.
-$decidedStatement = $pdo->prepare(
-    "SELECT * FROM leave_requests WHERE employee_id = ? AND status IN ('Approved', 'Rejected') AND notified_at IS NULL"
-);
-$decidedStatement->execute([EMPLOYEE_ID]);
-foreach ($decidedStatement->fetchAll() as $leaveRequest) {
-    $title = $leaveRequest['status'] === 'Approved' ? 'Leave request approved' : 'Leave request rejected';
-    $body = $leaveRequest['category'] . ' on ' . $leaveRequest['leave_date'] . ' was ' . strtolower($leaveRequest['status']) . '.';
-    sendPush($webPush, $pdo, $title, $body, 'notify_leave_status');
-    $pdo->prepare('UPDATE leave_requests SET notified_at = NOW(), reviewed_at = COALESCE(reviewed_at, NOW()) WHERE id = ?')
-        ->execute([$leaveRequest['id']]);
+    // Clock-out reminder: within REMINDER_LEAD_MINUTES of shift end, clocked
+    // in but never clocked out.
+    $shiftEnd = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . REMINDER_SHIFT_END);
+    $reminderWindowStart = (clone $shiftEnd)->modify('-' . REMINDER_LEAD_MINUTES . ' minutes');
+    if ($now >= $reminderWindowStart && $now <= $shiftEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out'] && !alreadySentToday($pdo, $employeeId, 'clock_out')) {
+        sendPush($webPush, $pdo, $employeeId, 'Shift ending soon', 'Remember to clock out before you leave.', 'notify_clock_out');
+        markSent($pdo, $employeeId, 'clock_out');
+    }
+
+    // Leave/MC approval updates: a supervisor changes status directly in the
+    // database (this app has no admin UI), so this is the only place that
+    // notices it happened -- pick up any decision that hasn't been pushed yet.
+    $decidedStatement = $pdo->prepare(
+        "SELECT * FROM leave_requests WHERE employee_id = ? AND status IN ('Approved', 'Rejected') AND notified_at IS NULL"
+    );
+    $decidedStatement->execute([$employeeId]);
+    foreach ($decidedStatement->fetchAll() as $leaveRequest) {
+        $title = $leaveRequest['status'] === 'Approved' ? 'Leave request approved' : 'Leave request rejected';
+        $body = $leaveRequest['category'] . ' on ' . $leaveRequest['leave_date'] . ' was ' . strtolower($leaveRequest['status']) . '.';
+        sendPush($webPush, $pdo, $employeeId, $title, $body, 'notify_leave_status');
+        $pdo->prepare('UPDATE leave_requests SET notified_at = NOW(), reviewed_at = COALESCE(reviewed_at, NOW()) WHERE id = ?')
+            ->execute([$leaveRequest['id']]);
+    }
 }
 
 echo "Reminder check complete at " . $now->format('Y-m-d H:i:s') . "\n";

@@ -40,6 +40,7 @@ try {
         respond(['success' => true, 'message' => 'Notification preferences updated.']);
     }
 
+    $employee = resolveEmployee($pdo, $input['employeeId'] ?? null);
     $subscription = $input['subscription'] ?? null;
     $endpoint = $subscription['endpoint'] ?? '';
     $p256dh = $subscription['keys']['p256dh'] ?? '';
@@ -57,7 +58,7 @@ try {
         'INSERT INTO push_subscriptions (employee_id, endpoint, p256dh, auth, notify_clock_in, notify_clock_out, notify_leave_status) VALUES (?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE employee_id = VALUES(employee_id), p256dh = VALUES(p256dh), auth = VALUES(auth), notify_clock_in = VALUES(notify_clock_in), notify_clock_out = VALUES(notify_clock_out), notify_leave_status = VALUES(notify_leave_status)'
     );
-    $upsert->execute([EMPLOYEE_ID, $endpoint, $p256dh, $auth, $notifyClockIn, $notifyClockOut, $notifyLeaveStatus]);
+    $upsert->execute([$employee['id'], $endpoint, $p256dh, $auth, $notifyClockIn, $notifyClockOut, $notifyLeaveStatus]);
 
     respond(['success' => true, 'message' => 'Notifications turned on.']);
 } catch (Throwable $error) {

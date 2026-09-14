@@ -9,6 +9,10 @@ createRoot(document.getElementById('root')).render(
   </StrictMode>,
 )
 
-if ('serviceWorker' in navigator) {
+// Only register the service worker in a real production build. Registering
+// it during `npm run dev` caches dev-server responses (including module
+// scripts that change or disappear on every restart), which causes the
+// page to break in confusing ways whenever the dev server isn't running.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js'))
 }
