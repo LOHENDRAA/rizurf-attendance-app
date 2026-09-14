@@ -113,6 +113,24 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 
 
 -- ----------------------------------------------------------------------------
+-- device_links - one row per device that has ever clocked someone in.
+-- Whichever intern first clocks in from a device claims it (app writes this
+-- row); any other intern's clock-in from that same device is refused from
+-- then on (api/config.php's enforceDeviceOwnership()), regardless of how
+-- they authenticated with the gateway. This -- not a password, there isn't
+-- one -- is what actually stops one intern clocking another in.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS device_links (
+  device_id      CHAR(32) NOT NULL,
+  intern_id      CHAR(36) NOT NULL,
+  first_seen_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (device_id),
+  KEY device_links_intern_idx (intern_id)
+) ENGINE=InnoDB;
+
+
+-- ----------------------------------------------------------------------------
 -- attendance_feed - the read model the app renders. An approved Medical
 -- Leave/MC on the same day overrides the stored status. Intern name /
 -- ref_number are merged in by the app from the Intern Database API.

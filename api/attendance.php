@@ -44,6 +44,10 @@ try {
         respond(['success' => false, 'message' => 'Choose a valid attendance action and mode.'], 422);
     }
 
+    // The actual anti-buddy-punching check -- a device that already clocked
+    // in a different intern is refused here, before anything else happens.
+    enforceDeviceOwnership($pdo, $internId);
+
     if ($mode === 'Office') {
         if (($input['qrToken'] ?? '') !== officeQr()) {
             respond(['success' => false, 'message' => 'The office QR code is invalid.'], 422);

@@ -46,6 +46,7 @@ $routes = [
     '/api/attendance' => ['GET', 'POST'],
     '/api/leave' => ['GET', 'POST'],
     '/api/me' => ['GET'],
+    '/api/device' => ['GET', 'POST'],
 ];
 const PUBLIC_PATHS = ['/health', '/openapi.json'];
 
@@ -110,6 +111,15 @@ if (isset($routes[$apiPath])) {
     if ($apiPath === '/api/leave') {
         require __DIR__ . '/leave.php';
         exit;
+    }
+    if ($apiPath === '/api/device') {
+        $pdo = database();
+        $internId = currentInternId($pdo);
+        if ($method === 'GET') {
+            sendJson(200, ['success' => true] + deviceLinkStatus($pdo, $internId));
+        }
+        releaseDeviceLink($pdo, $internId);
+        sendJson(200, ['success' => true, 'linked' => false, 'isYou' => false]);
     }
 }
 

@@ -207,6 +207,24 @@ function internDbGet(string $path): array
     return $body;
 }
 
+/**
+ * A fixed local roster, used instead of a real Intern Database call -- only
+ * when BOTH DEV_ALLOW_NO_AUTH and DEV_MOCK_INTERNS are explicitly set, so it
+ * can never activate on the registered deployment. Exists purely so this app
+ * (and anything built against it, like the device-link check) can be run and
+ * tested end-to-end with no live infrastructure -- no VPS DB reachable from
+ * here, no Intern Database credentials. Shaped to match what the real
+ * service returns (see src/App.jsx's use of intern.first_name etc).
+ */
+function mockInternDirectory(): array
+{
+    $interns = [
+        ['id' => '11111111-1111-4111-8111-111111111111', 'ref_number' => 'INT-0007', 'first_name' => 'Alex', 'last_name' => 'Morgan', 'email_address' => 'alex.morgan@example.com', 'department_id' => 'Marketing', 'mode' => 'Hybrid', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
+        ['id' => '22222222-2222-4222-8222-222222222222', 'ref_number' => 'INT-0008', 'first_name' => 'Jordan', 'last_name' => 'Lee', 'email_address' => 'jordan.lee@example.com', 'department_id' => 'Operations', 'mode' => 'On-site', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
+    ];
+    return array_combine(array_column($interns, 'id'), $interns);
+}
+
 /** Every intern, one API round of pages, indexed by id. Cached per request. */
 function internDirectory(): array
 {
@@ -214,6 +232,12 @@ function internDirectory(): array
     if ($byId !== null) {
         return $byId;
     }
+
+    if (filter_var(env('DEV_ALLOW_NO_AUTH', ''), FILTER_VALIDATE_BOOL)
+        && filter_var(env('DEV_MOCK_INTERNS', ''), FILTER_VALIDATE_BOOL)) {
+        return $byId = mockInternDirectory();
+    }
+
     $byId = [];
     $offset = 0;
     $limit = 100;
@@ -452,6 +476,100 @@ function todayRecord(PDO $pdo, string $internId): ?array
     $statement->execute([$internId, date('Y-m-d')]);
     $record = $statement->fetch();
     return $record ? formatRecord($record) : null;
+}
+
+// ----------------------------------------------------------------------------
+// Device linking -- an intern's own device is what actually stops one intern
+// clocking another in (buddy punching). The gateway proves *who is signed
+// in*; this proves *the device they're clocking in from hasn't already been
+// used for someone else*. Deliberately no password/PIN of any kind -- there
+// is nothing here for one intern to hand to another.
+// ----------------------------------------------------------------------------
+
+const DEVICE_COOKIE = 'rizurf_device_id';
+
+/**
+ * The device id lives in a server-issued HttpOnly cookie, never client-side
+ * storage -- a value JavaScript can read, it can also reset with one console
+ * line (localStorage.clear()), which would defeat the whole check. An
+ * HttpOnly cookie is only ever set here, by PHP; the browser just attaches
+ * it automatically and a page script cannot touch it.
+ */
+function resolveDeviceId(): string
+{
+    $deviceId = $_COOKIE[DEVICE_COOKIE] ?? '';
+    if (preg_match('/^[a-f0-9]{32}$/', $deviceId)) {
+        return $deviceId;
+    }
+    $deviceId = bin2hex(random_bytes(16));
+    setcookie(DEVICE_COOKIE, $deviceId, [
+        'expires' => time() + 60 * 60 * 24 * 365 * 3,
+        'path' => '/',
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure' => str_starts_with(rtrim((string) env('PUBLIC_URL', ''), '/'), 'https://'),
+    ]);
+    return $deviceId;
+}
+
+/**
+ * Whichever intern first clocks in from a device claims it; any other
+ * intern's clock-in from that same device is refused from then on,
+ * regardless of how they authenticated with the gateway. A new phone is
+ * simply a new, unclaimed device -- nothing is bound to hardware, only to
+ * "has this device cookie already been used for someone else," so there is
+ * no re-linking step when someone's hardware changes. Ends the response
+ * with a 409 if the device belongs to a different intern.
+ */
+function enforceDeviceOwnership(PDO $pdo, string $internId): void
+{
+    $deviceId = resolveDeviceId();
+
+    $statement = $pdo->prepare('SELECT intern_id FROM device_links WHERE device_id = ?');
+    $statement->execute([$deviceId]);
+    $ownerId = $statement->fetchColumn();
+
+    if ($ownerId === false) {
+        $pdo->prepare('INSERT INTO device_links (device_id, intern_id) VALUES (?, ?)')
+            ->execute([$deviceId, $internId]);
+        return;
+    }
+
+    if ((string) $ownerId !== $internId) {
+        respond(['success' => false, 'message' => 'This device is already linked to a different intern. Use your own device to clock in.'], 409);
+    }
+
+    $pdo->prepare('UPDATE device_links SET last_used_at = NOW() WHERE device_id = ?')->execute([$deviceId]);
+}
+
+/** Whether the current device is already linked, and to whom (for Settings). */
+function deviceLinkStatus(PDO $pdo, string $internId): array
+{
+    $deviceId = $_COOKIE[DEVICE_COOKIE] ?? '';
+    if (!preg_match('/^[a-f0-9]{32}$/', $deviceId)) {
+        return ['linked' => false, 'isYou' => false];
+    }
+    $statement = $pdo->prepare('SELECT intern_id FROM device_links WHERE device_id = ?');
+    $statement->execute([$deviceId]);
+    $ownerId = $statement->fetchColumn();
+    if ($ownerId === false) {
+        return ['linked' => false, 'isYou' => false];
+    }
+    return ['linked' => true, 'isYou' => (string) $ownerId === $internId];
+}
+
+/** Release the current device's link -- e.g. after a hardware change, or
+ *  handing a shared device back. Only the intern it's currently linked to
+ *  (or an unlinked device) can do this; it cannot be used to bump someone
+ *  else off their own device. */
+function releaseDeviceLink(PDO $pdo, string $internId): void
+{
+    $deviceId = $_COOKIE[DEVICE_COOKIE] ?? '';
+    if (!preg_match('/^[a-f0-9]{32}$/', $deviceId)) {
+        return;
+    }
+    $pdo->prepare('DELETE FROM device_links WHERE device_id = ? AND intern_id = ?')
+        ->execute([$deviceId, $internId]);
 }
 
 // ----------------------------------------------------------------------------
