@@ -263,6 +263,9 @@ function currentIdentity(): array
         $detail = $resolved['detail'] ?? null;
         if ($internId !== null) {
             $intern = internDirectory()[$internId] ?? null;
+            if ($intern !== null) {
+                $intern['department_name'] = departmentName($intern['department_id'] ?? null);
+            }
         }
     } catch (ConfigException $e) {
         throw $e; // let the handler name the missing env var

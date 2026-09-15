@@ -225,8 +225,8 @@ function internDbGet(string $path): array
 function mockInternDirectory(): array
 {
     $interns = [
-        ['id' => '11111111-1111-4111-8111-111111111111', 'ref_number' => 'INT-0007', 'first_name' => 'Alex', 'last_name' => 'Morgan', 'email_address' => 'alex.morgan@example.com', 'department_id' => 'Marketing', 'mode' => 'Hybrid', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
-        ['id' => '22222222-2222-4222-8222-222222222222', 'ref_number' => 'INT-0008', 'first_name' => 'Jordan', 'last_name' => 'Lee', 'email_address' => 'jordan.lee@example.com', 'department_id' => 'Operations', 'mode' => 'On-site', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
+        ['id' => '11111111-1111-4111-8111-111111111111', 'ref_number' => 'INT-0007', 'first_name' => 'Alex', 'last_name' => 'Morgan', 'email_address' => 'alex.morgan@example.com', 'department_id' => 'DEP-0001', 'mode' => 'Hybrid', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
+        ['id' => '22222222-2222-4222-8222-222222222222', 'ref_number' => 'INT-0008', 'first_name' => 'Jordan', 'last_name' => 'Lee', 'email_address' => 'jordan.lee@example.com', 'department_id' => 'DEP-0002', 'mode' => 'On-site', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
     ];
     return array_combine(array_column($interns, 'id'), $interns);
 }
@@ -277,6 +277,112 @@ function internIdByEmail(string $email): ?string
         }
     }
     return null;
+}
+
+// ----------------------------------------------------------------------------
+// Department Management service (department-api) - resolves department_id
+// (e.g. "DEP-0001", from the Intern Database) to a human-readable name. A
+// separate service from the Intern Database, per its own openapi.json:
+// "Resolve names/details via that service's GET /api/departments". Purely
+// best-effort: this service being down (or the department id being unknown)
+// must never break a page that's just trying to show someone's department --
+// callers get null back and fall back to the raw code themselves.
+// ----------------------------------------------------------------------------
+
+/** A fixed local roster, mirroring mockInternDirectory() -- same dev-only gate. */
+function mockDepartmentDirectory(): array
+{
+    return ['DEP-0001' => 'Marketing', 'DEP-0002' => 'Operations'];
+}
+
+function departmentApiToken(): string
+{
+    static $token = null;
+    static $expiresAt = 0;
+    if ($token !== null && time() < $expiresAt - 30) {
+        return $token;
+    }
+    $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
+    $clientId = envOrFail('INTERN_DB_CLIENT_ID');
+    $clientSecret = envOrFail('INTERN_DB_CLIENT_SECRET');
+    $audience = env('DEPARTMENT_API_AUDIENCE', 'department-api');
+
+    // A short timeout -- this whole lookup is best-effort (departmentName()
+    // falls back to the raw code), so it must never make the page people are
+    // waiting on noticeably slower just because this one dependency is down.
+    [$status, $body] = httpJson('POST', "$gateway/oauth/token", [
+        'Authorization: Basic ' . base64_encode("$clientId:$clientSecret"),
+        'Content-Type: application/json',
+    ], ['grant_type' => 'client_credentials', 'audience' => $audience], 4);
+
+    if ($status !== 200 || !isset($body['access_token'])) {
+        throw new RuntimeException("gateway /oauth/token for department-api returned $status");
+    }
+    $token = $body['access_token'];
+    $expiresAt = time() + (int) ($body['expires_in'] ?? 3600);
+    return $token;
+}
+
+/**
+ * department_id -> name, e.g. "DEP-0001" -> "Marketing". Empty on any
+ * failure -- never thrown, this is always a best-effort lookup.
+ *
+ * Cached to a temp file, not just this process, for a while either way: a
+ * working result rarely changes, and department-api being down must not
+ * cost every single page load its own multi-second wait on a dependency
+ * that's currently unreachable (mirrors health.php's cachedCheck()).
+ */
+function departmentDirectory(): array
+{
+    static $byId = null;
+    if ($byId !== null) {
+        return $byId;
+    }
+
+    if (filter_var(env('DEV_ALLOW_NO_AUTH', ''), FILTER_VALIDATE_BOOL)
+        && filter_var(env('DEV_MOCK_INTERNS', ''), FILTER_VALIDATE_BOOL)) {
+        return $byId = mockDepartmentDirectory();
+    }
+
+    $cacheFile = sys_get_temp_dir() . '/attendance_department_directory.json';
+    if (is_file($cacheFile)) {
+        $cached = json_decode((string) file_get_contents($cacheFile), true);
+        if (is_array($cached) && ($cached['at'] ?? 0) > time() - (int) ($cached['ttl'] ?? 0)) {
+            return $byId = $cached['data'];
+        }
+    }
+
+    $byId = [];
+    $ttl = 60; // unreachable -- don't retry on every request for a minute
+    try {
+        $base = rtrim(env('DEPARTMENT_API_URL', 'https://department-api.vercel.app'), '/');
+        [$status, $body] = httpJson('GET', "$base/api/departments", [
+            'Authorization: Bearer ' . departmentApiToken(),
+            'Accept: application/json',
+        ], null, 4);
+        if ($status === 200 && is_array($body['data'] ?? null)) {
+            foreach ($body['data'] as $department) {
+                if (isset($department['id'])) {
+                    $byId[$department['id']] = (string) ($department['name'] ?? $department['id']);
+                }
+            }
+            $ttl = 600; // working: re-check every 10 minutes, not every request
+        }
+    } catch (Throwable $e) {
+        error_log('[attendance-api] department directory unavailable: ' . $e->getMessage());
+    }
+    @file_put_contents($cacheFile, json_encode(['data' => $byId, 'at' => time(), 'ttl' => $ttl]));
+    return $byId;
+}
+
+/** Falls back to the raw code (or null) if the name can't be resolved --
+ *  the department service being down is never a reason to show nothing. */
+function departmentName(?string $departmentId): ?string
+{
+    if ($departmentId === null || $departmentId === '') {
+        return null;
+    }
+    return departmentDirectory()[$departmentId] ?? $departmentId;
 }
 
 // ----------------------------------------------------------------------------
@@ -582,15 +688,15 @@ function releaseDeviceLink(PDO $pdo, string $internId): void
 // Tiny JSON HTTP client (used for the gateway + Intern Database).
 // Returns [status, decoded body|raw].
 // ----------------------------------------------------------------------------
-function httpJson(string $method, string $url, array $headers = [], ?array $jsonBody = null): array
+function httpJson(string $method, string $url, array $headers = [], ?array $jsonBody = null, int $timeoutSeconds = 20): array
 {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_CUSTOMREQUEST => $method,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => $headers,
-        CURLOPT_TIMEOUT => 20,
-        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_TIMEOUT => $timeoutSeconds,
+        CURLOPT_CONNECTTIMEOUT => min(10, $timeoutSeconds),
     ]);
     if ($jsonBody !== null) {
         curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($jsonBody));
