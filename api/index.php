@@ -123,12 +123,12 @@ if (isset($routes[$apiPath])) {
         sendJson(200, ['success' => true, 'linked' => false, 'isYou' => false]);
     }
     if ($apiPath === '/api/signout') {
-        // Ends this app's own session only (S24 leaves sign-out authoritative
-        // at the gateway). On a device shared with other interns, someone
-        // still signed in at the gateway itself may be bounced straight back
-        // in on their next visit -- that's expected, not a bug here.
+        // Ends this app's own session (S24 leaves sign-out itself authoritative
+        // at the gateway). The frontend then sends the browser straight to the
+        // gateway's own site -- not back through our '/' -- so a live gateway
+        // SSO session can't silently bounce them right back into this app.
         clearAppSession();
-        sendJson(200, ['success' => true]);
+        sendJson(200, ['success' => true, 'gatewayUrl' => rtrim(envOrFail('GATEWAY_URL'), '/') . '/']);
     }
 }
 

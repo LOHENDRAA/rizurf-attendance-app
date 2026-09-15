@@ -80,14 +80,14 @@ function App() {
       .catch(() => showNotice('error', 'Could not unlink this device.'))
   }
 
-  // Ends this app's own session and sends you back through the gateway. On a
-  // device shared with other interns, someone still signed in at the gateway
-  // itself may get bounced straight back in without re-entering credentials
-  // -- signing out here doesn't end that broader gateway session.
+  // Ends this app's own session, then sends the browser straight to the
+  // gateway itself (not back through our own '/', which a live gateway SSO
+  // session could otherwise use to silently sign you straight back in here).
   const signOut = () => {
-    fetch('./api/signout.php', { method: 'POST' }).finally(() => {
-      window.location.href = './'
-    })
+    fetch('./api/signout.php', { method: 'POST' })
+      .then((response) => response.json())
+      .then((data) => { window.location.href = data.gatewayUrl || './' })
+      .catch(() => { window.location.href = './' })
   }
 
   const completeAttendance = (mode) => {
@@ -278,7 +278,7 @@ function App() {
       {modal && <div className="modal-backdrop" role="presentation" onClick={(event) => event.target === event.currentTarget && setModal(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="attendance-modal-title"><button className="modal-close" aria-label="Close" onClick={() => setModal(null)}><X size={18} /></button>{modal === 'mode' ? <><div className="modal-icon"><Clock3 size={22} /></div><p className="eyebrow">CLOCK {action.toUpperCase()}</p><h2 id="attendance-modal-title">How are you working today?</h2><p className="modal-subtitle">We will verify your attendance based on where you are.</p><div className="mode-options"><button className="mode-option" onClick={() => chooseMode('Office')}><span className="mode-icon office"><QrCode size={21} /></span><span><strong>At the office</strong><small>Scan QR and verify within 100m</small></span><ChevronRight size={17} /></button><button className="mode-option" onClick={() => chooseMode('Hybrid')}><span className="mode-icon hybrid"><MapPin size={21} /></span><span><strong>Hybrid / away</strong><small>Clock {action} without office QR</small></span><ChevronRight size={17} /></button></div></> : <><div className="modal-icon"><QrCode size={22} /></div><p className="eyebrow">OFFICE QR VERIFICATION</p><h2 id="attendance-modal-title">Scan the office QR</h2><p className="modal-subtitle">Scan the QR code provided by Rizurf, then stay within 100m while location is checked.</p><div id="qr-reader" className="qr-reader"></div>{scanStatus && <p className="scanner-status">{scanStatus}</p>}{scannerError && <p className="scanner-error">{scannerError}</p>}<label className="upload-qr"><FileScan size={16} /> Use a QR image<input type="file" accept="image/*" capture="environment" onChange={scanQrImage} /></label><button className="text-button cancel-scan" onClick={() => setModal(null)}>Cancel scan</button></>}</div></div>}
       {profileOpen && <div className="profile-backdrop" onClick={(event) => event.target === event.currentTarget && setProfileOpen(false)}><aside className="profile-drawer"><button className="drawer-close" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={19} /></button><div className="drawer-avatar">{initials}</div><p className="eyebrow">INTERN PROFILE</p><h2>{displayName}</h2><div className="credential-list"><div><span>Full legal name</span><strong>{displayName}</strong></div><div><span>Rizurf account</span><strong>{me?.email || '—'}</strong></div></div><div className="drawer-setting"><span><Bell size={18} /> Clock in/out reminder</span><button className={notificationsEnabled ? 'toggle is-on' : 'toggle'} aria-pressed={notificationsEnabled} onClick={() => setNotificationsEnabled(!notificationsEnabled)}><i></i></button></div><div className="drawer-setting"><span><ShieldCheck size={18} /> My device</span><strong>{device?.linked ? (device.isYou ? 'Linked to you' : 'Linked elsewhere') : 'Not linked yet'}</strong></div>{device?.linked && device?.isYou && <button className="drawer-setting drawer-action" onClick={releaseDevice}><Settings size={18} /> Unlink this device</button>}<p className="drawer-note">{device?.linked
         ? (device.isYou ? 'Clocking in from this device works only for you, on this device, until you unlink it.' : 'This device already clocked in a different intern, so it can\'t be used for your account.')
-        : 'The first time you clock in, this device links to you -- after that, no one else can clock in from it.'}</p><button className="drawer-setting drawer-action logout-button" onClick={signOut}><LogOut size={18} /> Sign out</button><p className="drawer-note">Ends your session in this app. If you're still signed in to the Rizurf gateway elsewhere on this device, reopening the app may sign you straight back in.</p></aside></div>}
+        : 'The first time you clock in, this device links to you -- after that, no one else can clock in from it.'}</p><button className="drawer-setting drawer-action logout-button" onClick={signOut}><LogOut size={18} /> Sign out</button><p className="drawer-note">Ends your session in this app and takes you to the Rizurf gateway. If you're still signed in there, opening this app again may sign you straight back in.</p></aside></div>}
     </div>
   )
 }
