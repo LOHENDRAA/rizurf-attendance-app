@@ -34,6 +34,30 @@ function formatDate(date) {
   return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: '2-digit' })
 }
 
+function SkeletonLine({ width, height = 14, style }) {
+  return <span className="skeleton skeleton-line" style={{ width, height, ...style }}></span>
+}
+
+function ProfileChipSkeleton() {
+  return <span className="profile-chip"><span className="skeleton skeleton-circle avatar"></span><SkeletonLine width={72} height={11} style={{ marginLeft: 4 }} /></span>
+}
+
+function WelcomeRowSkeleton() {
+  return <section className="welcome-row"><div><SkeletonLine width={90} height={11} style={{ marginBottom: 12 }} /><SkeletonLine width={230} height={30} style={{ marginBottom: 10 }} /><SkeletonLine width={200} height={14} /></div><span className="skeleton skeleton-pill" style={{ width: 150, height: 34 }}></span></section>
+}
+
+function HeroSkeleton() {
+  return <div className="hero-copy"><SkeletonLine width={110} height={10} style={{ marginBottom: 14 }} /><SkeletonLine width={220} height={26} style={{ marginBottom: 12 }} /><SkeletonLine width={260} height={13} style={{ marginBottom: 22 }} /><span className="skeleton skeleton-pill" style={{ width: 140, height: 42 }}></span></div>
+}
+
+function MetricCardSkeleton() {
+  return <article className="metric-card"><span className="skeleton skeleton-circle" style={{ width: 36, height: 36 }}></span><div><SkeletonLine width={70} height={11} style={{ marginBottom: 8 }} /><SkeletonLine width={50} height={20} /></div></article>
+}
+
+function HistoryRowSkeleton() {
+  return <div className="history-row"><div className="history-date"><SkeletonLine width={40} height={11} style={{ marginBottom: 4 }} /><SkeletonLine width={55} height={10} /></div><div className="history-times"><SkeletonLine width={60} height={11} style={{ marginBottom: 4 }} /><SkeletonLine width={70} height={10} /></div><SkeletonLine width={45} height={10} /><span className="skeleton skeleton-pill" style={{ width: 50, height: 20 }}></span></div>
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState('home')
   const [notice, setNotice] = useState(null)
@@ -45,6 +69,8 @@ function App() {
   const [profileOpen, setProfileOpen] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(false)
   const [me, setMe] = useState(null)
+  const [meLoaded, setMeLoaded] = useState(false)
+  const [attendanceLoaded, setAttendanceLoaded] = useState(false)
   const [device, setDevice] = useState(null)
   const [theme, setTheme] = useState(() => {
     const stored = localStorage.getItem('rizurf-theme')
@@ -64,6 +90,7 @@ function App() {
       .then((response) => response.json())
       .then((data) => { if (!data.error) setMe(data) })
       .catch(() => {})
+      .finally(() => setMeLoaded(true))
   }, [])
 
   useEffect(() => {
@@ -75,7 +102,10 @@ function App() {
         setToday(data.today || null)
       })
       .catch((error) => showNotice('error', error.message || 'Could not load your attendance history.'))
+      .finally(() => setAttendanceLoaded(true))
   }, [])
+
+  const showSkeleton = !meLoaded || !attendanceLoaded
 
   const loadDeviceStatus = () => fetch('./api/device.php')
     .then((response) => response.json())
@@ -344,21 +374,21 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="breadcrumbs"><span>Attendance console</span><b>/</b><strong>Dashboard</strong></div>
-        <div className="topbar-actions"><span className="system-status"><i></i> All systems operational</span><button className="profile-chip" aria-label="Open profile" onClick={() => selectTab('profile')}><span className="avatar">{initials}</span><span className="profile-name">{displayName}</span><ChevronRight size={15} /></button></div>
+        <div className="topbar-actions"><span className="system-status"><i></i> All systems operational</span>{meLoaded ? <button className="profile-chip" aria-label="Open profile" onClick={() => selectTab('profile')}><span className="avatar">{initials}</span><span className="profile-name">{displayName}</span><ChevronRight size={15} /></button> : <ProfileChipSkeleton />}</div>
       </header>
 
       <main id="overview" className={`tab-content ${activeTab}-tab`}>
-        <section className="welcome-row"><div><p className="eyebrow">{formatDate(new Date())}</p><h1>Good morning, {firstName}</h1><p className="subtitle">Record your workday in a few seconds.</p></div><div className="location-pill"><span className="live-dot"></span><MapPin size={15} /> {intern?.department_id ? `Dept ${intern.department_id}` : 'Rizurf'}</div></section>
+        {showSkeleton ? <WelcomeRowSkeleton /> : <section className="welcome-row"><div><p className="eyebrow">{formatDate(new Date())}</p><h1>Good morning, {firstName}</h1><p className="subtitle">Record your workday in a few seconds.</p></div><div className="location-pill"><span className="live-dot"></span><MapPin size={15} /> {intern?.department_id ? `Dept ${intern.department_id}` : 'Rizurf'}</div></section>}
         {notLinked && <div className="notice error" role="status"><X size={17} />{me.reason === 'lookup_failed'
           ? `Could not reach the Intern Database${me.detail ? ` (${me.detail})` : ''}. Your attendance will load once it is back.`
           : `Your Rizurf account${me?.email ? ` (${me.email})` : ''} isn't linked to an intern record yet. Ask an admin to add you in the Intern Database.`}</div>}
         {notice && <div className={`notice ${notice.type}`} role="status">{notice.type === 'success' ? <Check size={17} /> : <X size={17} />}{notice.message}<button aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={15} /></button></div>}
 
-        <section className="attendance-hero"><div className="hero-copy"><p className="eyebrow">TODAY'S ATTENDANCE</p><h2>{isClockedIn ? 'You are clocked in' : today?.clockOut ? 'Workday complete' : 'Ready to clock in?'}</h2><p>{isClockedIn ? `Started at ${today.clockIn} via ${today.mode}. Clock out when you finish.` : today?.clockOut ? `Clocked out at ${today.clockOut} via ${today.clockOutMode || today.mode}.` : 'Choose Office if you are at work, or Hybrid if you are working away.'}</p><div className="attendance-actions"><button className={today?.clockOut ? 'primary-button checked-in' : 'primary-button'} onClick={openAttendance} disabled={Boolean(today?.clockOut)}>{today?.clockOut ? <><Check size={18} /> Attendance complete</> : <><Clock3 size={18} /> Clock {action}</>}</button></div><span className="location-note"><ShieldCheck size={14} /> Office location within 100m · Mobile data supported</span></div><div className="hero-location"><div className="location-orbit"><MapPin size={35} /></div><strong>Office verification</strong><span>100m radius from the office</span><small>{officeAddress}</small></div></section>
+        <section className="attendance-hero">{showSkeleton ? <HeroSkeleton /> : <div className="hero-copy"><p className="eyebrow">TODAY'S ATTENDANCE</p><h2>{isClockedIn ? 'You are clocked in' : today?.clockOut ? 'Workday complete' : 'Ready to clock in?'}</h2><p>{isClockedIn ? `Started at ${today.clockIn} via ${today.mode}. Clock out when you finish.` : today?.clockOut ? `Clocked out at ${today.clockOut} via ${today.clockOutMode || today.mode}.` : 'Choose Office if you are at work, or Hybrid if you are working away.'}</p><div className="attendance-actions"><button className={today?.clockOut ? 'primary-button checked-in' : 'primary-button'} onClick={openAttendance} disabled={Boolean(today?.clockOut)}>{today?.clockOut ? <><Check size={18} /> Attendance complete</> : <><Clock3 size={18} /> Clock {action}</>}</button></div><span className="location-note"><ShieldCheck size={14} /> Office location within 100m · Mobile data supported</span></div>}<div className="hero-location"><div className="location-orbit"><MapPin size={35} /></div><strong>Office verification</strong><span>100m radius from the office</span><small>{officeAddress}</small></div></section>
 
-        <section className="quick-grid"><article className="metric-card accent-card"><div className="metric-icon"><Clock3 size={19} /></div><div><p>Late arrivals</p><strong>{history.filter((entry) => entry.status === 'Late').length} <small>times</small></strong><em>This month</em></div></article><article className="metric-card"><div className="metric-icon pale"><Clock3 size={19} /></div><div><p>Today</p><strong>{today?.clockIn || '—'} <small>{today?.clockOut ? `to ${today.clockOut}` : '/ pending'}</small></strong><em>{today?.mode || 'No attendance recorded yet'}</em></div></article></section>
+        <section className="quick-grid">{showSkeleton ? <><MetricCardSkeleton /><MetricCardSkeleton /></> : <><article className="metric-card accent-card"><div className="metric-icon"><Clock3 size={19} /></div><div><p>Late arrivals</p><strong>{history.filter((entry) => entry.status === 'Late').length} <small>times</small></strong><em>This month</em></div></article><article className="metric-card"><div className="metric-icon pale"><Clock3 size={19} /></div><div><p>Today</p><strong>{today?.clockIn || '—'} <small>{today?.clockOut ? `to ${today.clockOut}` : '/ pending'}</small></strong><em>{today?.mode || 'No attendance recorded yet'}</em></div></article></>}</section>
 
-        {activeTab === 'history' && <section className="tab-panel logs-panel"><div className="tab-heading"><p className="eyebrow">ATTENDANCE LOGS</p><h1>My attendance history</h1><p>Clock-ins, clock-outs, late arrivals, and grace-period records.</p></div><article className="activity-card"><div className="history-list">{history.map((entry) => <div className="history-row" key={`log-${entry.id}`}><div className="history-date"><strong>{entry.date.split(',')[0]}</strong><span>{entry.date.split(',').slice(1).join(',')}</span></div><div className="history-times"><strong>{entry.clockIn || '—'}</strong><span>{entry.clockOut ? `to ${entry.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{entry.mode}</span><span className={`status-tag ${entry.status === 'On time' ? 'green' : entry.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{entry.status}</span></div>)}</div></article></section>}
+        {activeTab === 'history' && <section className="tab-panel logs-panel"><div className="tab-heading"><p className="eyebrow">ATTENDANCE LOGS</p><h1>My attendance history</h1><p>Clock-ins, clock-outs, late arrivals, and grace-period records.</p></div><article className="activity-card"><div className="history-list">{showSkeleton ? <><HistoryRowSkeleton /><HistoryRowSkeleton /><HistoryRowSkeleton /></> : history.map((entry) => <div className="history-row" key={`log-${entry.id}`}><div className="history-date"><strong>{entry.date.split(',')[0]}</strong><span>{entry.date.split(',').slice(1).join(',')}</span></div><div className="history-times"><strong>{entry.clockIn || '—'}</strong><span>{entry.clockOut ? `to ${entry.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{entry.mode}</span><span className={`status-tag ${entry.status === 'On time' ? 'green' : entry.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{entry.status}</span></div>)}</div></article></section>}
       </main>
       <footer><span>Rizurf People Ops</span><span>Attendance service <b></b> All systems operational</span></footer>
 

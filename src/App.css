@@ -162,3 +162,16 @@ main { max-width: none; padding: 42px 32px 58px; }.welcome-row { align-items: st
 [data-theme='dark'] .bottom-nav { background: rgba(20, 27, 44, .92); }
 [data-theme='dark'] .scan-button { border-color: var(--neutral-bg); }
 [data-theme='dark'] .profile-nav-icon i { border-color: var(--neutral-bg); }
+
+/* Skeleton loading placeholders -- shown while /api/me and /api/attendance
+   are still in flight, sized to match the real content so nothing jumps
+   when it swaps in. */
+:root { --skeleton-base: #e3e8ef; --skeleton-highlight: #f3f5f9; }
+[data-theme='dark'] { --skeleton-base: #202a40; --skeleton-highlight: #2d3a56; }
+.skeleton { display: inline-block; background: linear-gradient(90deg, var(--skeleton-base) 25%, var(--skeleton-highlight) 37%, var(--skeleton-base) 63%); background-size: 400% 100%; animation: skeleton-shimmer 1.4s ease infinite; }
+.skeleton-line { border-radius: 5px; }
+.skeleton-circle { border-radius: 50%; flex: none; }
+.skeleton-pill { border-radius: var(--radius-pill); }
+@keyframes skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+.profile-chip .skeleton.avatar { width: 31px; height: 31px; }
