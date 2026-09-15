@@ -17,6 +17,22 @@ use Minishlink\WebPush\Subscription;
 //
 // Runs entirely off push_subscriptions -- an intern who never turned
 // reminders on is never even considered.
+//
+// vercel.json fires this twice a day, not on an interval: the Hobby plan
+// caps a single cron schedule at once/day, so a naive "*/10 * * * *" (the
+// original attempt here) fails every deployment outright rather than just
+// running less often. Two separate once-daily crons, timed to land inside
+// each reminder's own window, cover both checks within that limit -- this
+// function still checks both conditions on every run regardless of which
+// cron triggered it, so which one fires when doesn't matter functionally.
+//
+// Vercel Cron schedules are always UTC, never the app's APP_TIMEZONE. With
+// the .env.example defaults (Asia/Kuala_Lumpur, UTC+8):
+//   "10 1 * * *"  -> 09:10 MYT, matching REMINDER_CLOCK_IN_DEADLINE
+//   "50 9 * * *"  -> 17:50 MYT, inside the 17:45-18:00 REMINDER_SHIFT_END
+//                    window with a few minutes of margin either side
+// Change REMINDER_CLOCK_IN_DEADLINE / REMINDER_SHIFT_END and these two
+// schedules need updating by hand to match -- they aren't read from env.
 // ============================================================================
 
 // A person calling this directly gets the same 401 shape as everything else;
