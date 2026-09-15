@@ -47,6 +47,7 @@ $routes = [
     '/api/leave' => ['GET', 'POST'],
     '/api/me' => ['GET'],
     '/api/device' => ['GET', 'POST'],
+    '/api/signout' => ['POST'],
 ];
 const PUBLIC_PATHS = ['/health', '/openapi.json'];
 
@@ -120,6 +121,14 @@ if (isset($routes[$apiPath])) {
         }
         releaseDeviceLink($pdo, $internId);
         sendJson(200, ['success' => true, 'linked' => false, 'isYou' => false]);
+    }
+    if ($apiPath === '/api/signout') {
+        // Ends this app's own session only (S24 leaves sign-out authoritative
+        // at the gateway). On a device shared with other interns, someone
+        // still signed in at the gateway itself may be bounced straight back
+        // in on their next visit -- that's expected, not a bug here.
+        clearAppSession();
+        sendJson(200, ['success' => true]);
     }
 }
 
