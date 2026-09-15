@@ -111,3 +111,54 @@ main { max-width: none; padding: 42px 32px 58px; }.welcome-row { align-items: st
 @keyframes drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
 @media (max-width: 560px) { .profile-drawer { top: auto; width: 100%; max-height: 92vh; border-radius: 18px 18px 0 0; padding: 28px 20px 20px; animation: sheet-in .22s ease-out; }.drawer-close { top: 10px; right: 10px; }.drawer-avatar { margin-top: 10px; }.logout-button { margin-top: 18px; }.attendance-actions { align-items: stretch; flex-direction: column; }.attendance-actions .primary-button, .attendance-actions .secondary-action { width: 100%; }.allowance-card em, .timeline-card em { white-space: normal; } }
 @keyframes sheet-in { from { transform: translateY(100%); } to { transform: translateY(0); } }
+
+.drawer-note { color: var(--neutral-gray); font-size: var(--font-size-secondary); line-height: 1.5; }
+
+/* Dark mode. Most of the app already reads color from the --brand and
+   --neutral tokens above, so redefining those here covers it -- but a fair
+   amount of this file (notices, status tags, metric icon chips, the modal,
+   the mode picker, the toggle track, the logout button...) was written with
+   literal light hex colors instead of a token, so those need their own
+   overrides here too, not just the variables. */
+[data-theme='dark'] {
+	--brand-dark: #0a1626;
+	--brand-navy: #5b9bdb;
+	--brand-teal-dark: #37c9e0;
+	--brand-teal: #22d3ee;
+	--brand-ice: #123043;
+	--neutral-dark: #eef2f8;
+	--neutral-gray: #93a2ba;
+	--neutral-border: #26324a;
+	--neutral-white: #141b2c;
+	--neutral-bg: #0b111d;
+	--status-success: #2fcf70;
+	--status-warning: #f2b544;
+	--status-danger: #f47a64;
+	--shadow: 0 12px 30px rgba(0, 0, 0, .45);
+}
+[data-theme='dark'] body { color-scheme: dark; }
+[data-theme='dark'] .notice.success { background: rgba(47, 207, 112, .14); }
+[data-theme='dark'] .notice.error { background: rgba(244, 122, 100, .14); }
+[data-theme='dark'] .status-tag.green { background: rgba(47, 207, 112, .14); }
+[data-theme='dark'] .status-tag.orange { color: #f2b544; background: rgba(242, 181, 68, .14); }
+[data-theme='dark'] .metric-icon.pale { background: rgba(91, 155, 219, .14); }
+[data-theme='dark'] .metric-icon.yellow { color: #f2b544; background: rgba(242, 181, 68, .14); }
+[data-theme='dark'] .hero-location { border-color: var(--neutral-border); }
+[data-theme='dark'] .location-orbit { box-shadow: 0 0 0 12px rgba(34, 211, 238, .08), 0 0 0 24px rgba(34, 211, 238, .04); }
+[data-theme='dark'] .live-dot { box-shadow: 0 0 0 3px rgba(47, 207, 112, .2); }
+[data-theme='dark'] .modal { background: var(--neutral-white); }
+[data-theme='dark'] .modal-backdrop { background: rgba(0, 0, 0, .6); }
+[data-theme='dark'] .mode-option { background: var(--neutral-white); }
+[data-theme='dark'] .mode-icon.hybrid { color: #f2b544; background: rgba(242, 181, 68, .14); }
+[data-theme='dark'] .upload-qr { border-color: var(--neutral-border); }
+[data-theme='dark'] .scanner-error { background: rgba(244, 122, 100, .14); }
+[data-theme='dark'] .scanner-status { color: var(--neutral-gray); background: rgba(34, 211, 238, .1); }
+[data-theme='dark'] .qr-reader { background: #0b111d; }
+[data-theme='dark'] .profile-backdrop { background: rgba(0, 0, 0, .6); }
+[data-theme='dark'] .toggle:not(.is-on) { background: #2a3549; }
+[data-theme='dark'] .logout-button { background: rgba(244, 122, 100, .1); border-color: rgba(244, 122, 100, .35); }
+[data-theme='dark'] .breadcrumbs b { color: var(--neutral-gray); }
+[data-theme='dark'] .drawer-avatar { color: var(--neutral-bg); }
+[data-theme='dark'] .bottom-nav { background: rgba(20, 27, 44, .92); }
+[data-theme='dark'] .scan-button { border-color: var(--neutral-bg); }
+[data-theme='dark'] .profile-nav-icon i { border-color: var(--neutral-bg); }

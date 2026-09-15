@@ -3,11 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="theme-color" content="#f6f8f5" />
-    <meta name="description" content="Northstar employee attendance" />
+    <meta name="description" content="Rizurf Realty employee attendance" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Northstar Attendance</title>
+    <title>Rizurf Realty Attendance</title>
+    <script>
+      // Applied before React mounts, so a dark-mode visitor doesn't see a
+      // flash of the light theme while the bundle loads.
+      (function () {
+        var stored = localStorage.getItem('rizurf-theme')
+        var theme = stored === 'light' || stored === 'dark'
+          ? stored
+          : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        document.documentElement.dataset.theme = theme
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
