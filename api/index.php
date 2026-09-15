@@ -342,9 +342,16 @@ function serveStaticFile(string $file): never
         'map' => 'application/json', 'txt' => 'text/plain',
     ];
     $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    // Only Vite's content-hashed bundle output (dist/assets/*.js|css, whose
+    // filename changes whenever the content does) is safe to cache forever.
+    // Everything else here is copied from public/ verbatim -- sw.js chief
+    // among them -- and keeps the same filename release to release, so an
+    // immutable year-long cache would mean an updated file stays invisible
+    // to every browser and CDN edge that already cached the old one.
+    $isHashedAsset = str_contains(str_replace('\\', '/', $file), '/assets/');
     http_response_code(200);
     header('Content-Type: ' . ($types[$ext] ?? 'application/octet-stream'));
-    header('Cache-Control: public, max-age=31536000, immutable');
+    header($isHashedAsset ? 'Cache-Control: public, max-age=31536000, immutable' : 'Cache-Control: no-cache, must-revalidate');
     readfile($file);
     exit;
 }
