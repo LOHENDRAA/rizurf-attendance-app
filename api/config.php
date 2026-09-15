@@ -130,6 +130,12 @@ function database(): PDO
         [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            // The real cost here isn't query time (a few ms) -- it's the TCP+TLS
+            // handshake to a remote VPS host, paid on every request since this
+            // runs as short-lived serverless functions. A persistent connection
+            // lets a warm function container reuse the same MySQL socket across
+            // invocations instead of re-handshaking every time.
+            PDO::ATTR_PERSISTENT => true,
         ],
     );
     $pdo->exec('SET time_zone = ' . $pdo->quote(env('DB_TIME_ZONE', '+08:00')));
