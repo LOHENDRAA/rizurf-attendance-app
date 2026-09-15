@@ -123,6 +123,11 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 CREATE TABLE IF NOT EXISTS device_links (
   device_id      CHAR(32) NOT NULL,
   intern_id      CHAR(36) NOT NULL,
+  -- Captured once, when the device is first claimed -- purely to show a
+  -- friendly label ("Chrome on Windows") in the linked-devices list. Never
+  -- used for any security decision; enforceDeviceOwnership() only ever
+  -- checks the cookie.
+  user_agent     VARCHAR(255) NULL,
   first_seen_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_used_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (device_id),

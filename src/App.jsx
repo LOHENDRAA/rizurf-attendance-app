@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Bell, Check, ChevronRight, Clock3, FileScan,
-  Home, LogOut, MapPin, Moon, QrCode, ScanLine, Settings,
+  Home, LogOut, MapPin, Moon, QrCode, ScanLine, Smartphone,
   ShieldCheck, Sun, X,
 } from 'lucide-react'
 import { Html5Qrcode } from 'html5-qrcode'
@@ -71,7 +71,7 @@ function App() {
   const [me, setMe] = useState(null)
   const [meLoaded, setMeLoaded] = useState(false)
   const [attendanceLoaded, setAttendanceLoaded] = useState(false)
-  const [device, setDevice] = useState(null)
+  const [devices, setDevices] = useState([])
   const [theme, setTheme] = useState(() => {
     const stored = localStorage.getItem('rizurf-theme')
     if (stored === 'light' || stored === 'dark') return stored
@@ -107,12 +107,12 @@ function App() {
 
   const showSkeleton = !meLoaded || !attendanceLoaded
 
-  const loadDeviceStatus = () => fetch('./api/device.php')
+  const loadDevices = () => fetch('./api/devices.php')
     .then((response) => response.json())
-    .then((data) => { if (data.success) setDevice(data) })
+    .then((data) => { if (data.success) setDevices(data.devices) })
     .catch(() => {})
 
-  useEffect(() => { loadDeviceStatus() }, [])
+  useEffect(() => { loadDevices() }, [])
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -186,17 +186,20 @@ function App() {
 
   const toggleNotifications = () => (notificationsEnabled ? disableNotifications() : enableNotifications())
 
-  // Releases the device from your account, e.g. after a hardware change --
-  // not a way to bump someone else off their own device (the server only
-  // lets you release a device that's actually linked to you).
-  const releaseDevice = () => {
-    fetch('./api/device.php', { method: 'POST' })
+  // Unlinks one device from your account -- any device in the list, not
+  // just the one you're using right now (e.g. logging out an old phone
+  // remotely), the way WhatsApp's own linked-devices list works. Not a way
+  // to bump someone else off their own device: the server only ever removes
+  // a device that's actually yours.
+  const unlinkDevice = (deviceId) => {
+    fetch('./api/devices.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId }) })
       .then((response) => response.json())
       .then((data) => {
-        setDevice(data)
-        showNotice('success', 'This device has been unlinked. It will link to whoever clocks in next.')
+        if (!data.success) throw new Error(data.message)
+        setDevices(data.devices)
+        showNotice('success', 'That device has been unlinked.')
       })
-      .catch(() => showNotice('error', 'Could not unlink this device.'))
+      .catch((error) => showNotice('error', error.message || 'Could not unlink that device.'))
   }
 
   // Ends this app's own session, then sends the browser straight to the
@@ -219,7 +222,7 @@ function App() {
         if (!data.success) throw new Error(data.message)
         setToday(data.today)
         setHistory(data.records)
-        loadDeviceStatus()
+        loadDevices()
         showNotice('success', `${action === 'in' ? 'Clocked in' : 'Clocked out'} at ${time} via ${mode}. ${data.message}`)
         setModal(null)
         setScannerError('')
@@ -395,9 +398,7 @@ function App() {
       <nav className="bottom-nav" aria-label="Primary navigation"><button className={activeTab === 'home' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('home')}><Home size={21} /><span>Home</span></button><button className="nav-tab scan-tab" onClick={() => selectTab('scan')}><span className="scan-button"><ScanLine size={24} /></span><span>Scan</span></button><button className={activeTab === 'history' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('history')}><Clock3 size={21} /><span>History</span></button></nav>
 
       {modal && <div className="modal-backdrop" role="presentation" onClick={(event) => event.target === event.currentTarget && setModal(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="attendance-modal-title"><button className="modal-close" aria-label="Close" onClick={() => setModal(null)}><X size={18} /></button>{modal === 'mode' ? <><div className="modal-icon"><Clock3 size={22} /></div><p className="eyebrow">CLOCK {action.toUpperCase()}</p><h2 id="attendance-modal-title">How are you working today?</h2><p className="modal-subtitle">We will verify your attendance based on where you are.</p><div className="mode-options"><button className="mode-option" onClick={() => chooseMode('Office')}><span className="mode-icon office"><QrCode size={21} /></span><span><strong>At the office</strong><small>Scan QR and verify within 100m</small></span><ChevronRight size={17} /></button><button className="mode-option" onClick={() => chooseMode('Hybrid')}><span className="mode-icon hybrid"><MapPin size={21} /></span><span><strong>Hybrid / away</strong><small>Clock {action} without office QR</small></span><ChevronRight size={17} /></button></div></> : <><div className="modal-icon"><QrCode size={22} /></div><p className="eyebrow">OFFICE QR VERIFICATION</p><h2 id="attendance-modal-title">Scan the office QR</h2><p className="modal-subtitle">Scan the QR code provided by Rizurf, then stay within 100m while location is checked.</p><div id="qr-reader" className="qr-reader"></div>{scanStatus && <p className="scanner-status">{scanStatus}</p>}{scannerError && <p className="scanner-error">{scannerError}</p>}<label className="upload-qr"><FileScan size={16} /> Use a QR image<input type="file" accept="image/*" capture="environment" onChange={scanQrImage} /></label><button className="text-button cancel-scan" onClick={() => setModal(null)}>Cancel scan</button></>}</div></div>}
-      {profileOpen && <div className="profile-backdrop" onClick={(event) => event.target === event.currentTarget && setProfileOpen(false)}><aside className="profile-drawer"><button className="drawer-close" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={19} /></button><div className="drawer-avatar">{initials}</div><p className="eyebrow">INTERN PROFILE</p><h2>{displayName}</h2><div className="credential-list"><div><span>Rizurf account</span><strong>{me?.email || '—'}</strong></div></div><div className="drawer-setting"><span><Bell size={18} /> Clock in/out reminder</span><button className={notificationsEnabled ? 'toggle is-on' : 'toggle'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><i></i></button></div><div className="drawer-setting"><span>{theme === 'dark' ? <Moon size={18} /> : <Sun size={18} />} Dark mode</span><button className={theme === 'dark' ? 'toggle is-on' : 'toggle'} aria-pressed={theme === 'dark'} onClick={toggleTheme}><i></i></button></div><div className="drawer-setting"><span><ShieldCheck size={18} /> My device</span><strong>{device?.linked ? (device.isYou ? 'Linked to you' : 'Linked elsewhere') : 'Not linked yet'}</strong></div>{device?.linked && device?.isYou && <button className="drawer-setting drawer-action" onClick={releaseDevice}><Settings size={18} /> Unlink this device</button>}<p className="drawer-note">{device?.linked
-        ? (device.isYou ? 'Clocking in from this device works only for you, on this device, until you unlink it.' : 'This device already clocked in a different intern, so it can\'t be used for your account.')
-        : 'The first time you clock in, this device links to you -- after that, no one else can clock in from it.'}</p><button className="drawer-setting drawer-action logout-button" onClick={signOut}><LogOut size={18} /> Sign out</button><p className="drawer-note">Ends your session in this app and takes you to the Rizurf gateway. If you're still signed in there, opening this app again may sign you straight back in.</p></aside></div>}
+      {profileOpen && <div className="profile-backdrop" onClick={(event) => event.target === event.currentTarget && setProfileOpen(false)}><aside className="profile-drawer"><button className="drawer-close" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={19} /></button><div className="drawer-avatar">{initials}</div><p className="eyebrow">INTERN PROFILE</p><h2>{displayName}</h2><div className="credential-list"><div><span>Rizurf account</span><strong>{me?.email || '—'}</strong></div></div><div className="drawer-setting"><span><Bell size={18} /> Clock in/out reminder</span><button className={notificationsEnabled ? 'toggle is-on' : 'toggle'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><i></i></button></div><div className="drawer-setting"><span>{theme === 'dark' ? <Moon size={18} /> : <Sun size={18} />} Dark mode</span><button className={theme === 'dark' ? 'toggle is-on' : 'toggle'} aria-pressed={theme === 'dark'} onClick={toggleTheme}><i></i></button></div><p className="eyebrow drawer-section-label"><ShieldCheck size={14} /> LINKED DEVICES</p>{devices.length > 0 ? <div className="device-list">{devices.map((d) => <button key={d.id} className="device-row" onClick={() => unlinkDevice(d.id)}><span className="device-icon"><Smartphone size={17} /></span><span className="device-info"><strong>{d.label}{d.isCurrent && <span className="device-current-tag"> · This device</span>}</strong><small>Last active {d.lastUsedAt}</small></span><X size={15} /></button>)}</div> : <p className="drawer-note">No devices linked yet. The first time you clock in, this device links to you -- after that, no one else can clock in from it.</p>}<button className="drawer-setting drawer-action logout-button" onClick={signOut}><LogOut size={18} /> Sign out</button><p className="drawer-note">Ends your session in this app and takes you to the Rizurf gateway. If you're still signed in there, opening this app again may sign you straight back in.</p></aside></div>}
     </div>
   )
 }

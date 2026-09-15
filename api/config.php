@@ -642,8 +642,8 @@ function enforceDeviceOwnership(PDO $pdo, string $internId): void
     $ownerId = $statement->fetchColumn();
 
     if ($ownerId === false) {
-        $pdo->prepare('INSERT INTO device_links (device_id, intern_id) VALUES (?, ?)')
-            ->execute([$deviceId, $internId]);
+        $pdo->prepare('INSERT INTO device_links (device_id, intern_id, user_agent) VALUES (?, ?, ?)')
+            ->execute([$deviceId, $internId, $_SERVER['HTTP_USER_AGENT'] ?? null]);
         return;
     }
 
@@ -654,34 +654,94 @@ function enforceDeviceOwnership(PDO $pdo, string $internId): void
     $pdo->prepare('UPDATE device_links SET last_used_at = NOW() WHERE device_id = ?')->execute([$deviceId]);
 }
 
-/** Whether the current device is already linked, and to whom (for Settings). */
-function deviceLinkStatus(PDO $pdo, string $internId): array
+/**
+ * A short, human "Chrome on Windows" / "Safari on iPhone" label from a
+ * User-Agent string, purely for display in the linked-devices list -- never
+ * used for any security decision. Deliberately simple pattern matching, not
+ * a full UA parser: good enough to tell devices apart in a short list, not
+ * meant to be precise about versions or edge cases.
+ */
+function deviceFriendlyLabel(?string $userAgent): string
 {
-    $deviceId = $_COOKIE[DEVICE_COOKIE] ?? '';
-    if (!preg_match('/^[a-f0-9]{32}$/', $deviceId)) {
-        return ['linked' => false, 'isYou' => false];
+    $ua = (string) $userAgent;
+    if ($ua === '') {
+        return 'Unknown device';
     }
-    $statement = $pdo->prepare('SELECT intern_id FROM device_links WHERE device_id = ?');
-    $statement->execute([$deviceId]);
-    $ownerId = $statement->fetchColumn();
-    if ($ownerId === false) {
-        return ['linked' => false, 'isYou' => false];
+
+    $os = match (true) {
+        (bool) preg_match('/iPhone/i', $ua) => 'iPhone',
+        (bool) preg_match('/iPad/i', $ua) => 'iPad',
+        (bool) preg_match('/Android/i', $ua) => 'Android',
+        (bool) preg_match('/Windows/i', $ua) => 'Windows',
+        (bool) preg_match('/Macintosh|Mac OS X/i', $ua) => 'Mac',
+        (bool) preg_match('/Linux/i', $ua) => 'Linux',
+        default => null,
+    };
+    $browser = match (true) {
+        (bool) preg_match('/EdgA?\//i', $ua) => 'Edge',
+        (bool) preg_match('/OPR\/|Opera/i', $ua) => 'Opera',
+        (bool) preg_match('/CriOS|Chrome/i', $ua) => 'Chrome',
+        (bool) preg_match('/FxiOS|Firefox/i', $ua) => 'Firefox',
+        (bool) preg_match('/Safari/i', $ua) => 'Safari',
+        default => null,
+    };
+
+    if ($browser && $os) {
+        return "$browser on $os";
     }
-    return ['linked' => true, 'isYou' => (string) $ownerId === $internId];
+    return $browser ?? $os ?? 'Unknown device';
 }
 
-/** Release the current device's link -- e.g. after a hardware change, or
- *  handing a shared device back. Only the intern it's currently linked to
- *  (or an unlinked device) can do this; it cannot be used to bump someone
- *  else off their own device. */
-function releaseDeviceLink(PDO $pdo, string $internId): void
+/**
+ * "Today at 03:47 PM" / "Yesterday at ..." / "Sep 12 at ...". $timestamp is a
+ * DATETIME string already in the app's own local time (the DB session is
+ * pinned to DB_TIME_ZONE) -- same technique formatRecord() uses for
+ * clock_in/clock_out, not left to the browser's own timezone to guess.
+ */
+function friendlyLastUsed(string $timestamp): string
 {
-    $deviceId = $_COOKIE[DEVICE_COOKIE] ?? '';
-    if (!preg_match('/^[a-f0-9]{32}$/', $deviceId)) {
-        return;
+    $then = strtotime($timestamp);
+    if ($then >= strtotime('today')) {
+        return 'Today at ' . date('h:i A', $then);
     }
-    $pdo->prepare('DELETE FROM device_links WHERE device_id = ? AND intern_id = ?')
-        ->execute([$deviceId, $internId]);
+    if ($then >= strtotime('yesterday')) {
+        return 'Yesterday at ' . date('h:i A', $then);
+    }
+    return date('M j', $then) . ' at ' . date('h:i A', $then);
+}
+
+/**
+ * Every device linked to this intern (across however many phones/laptops
+ * they've clocked in from), newest-used first -- the "Linked devices" list.
+ */
+function internDeviceLinks(PDO $pdo, string $internId): array
+{
+    $currentDeviceId = $_COOKIE[DEVICE_COOKIE] ?? '';
+    $statement = $pdo->prepare(
+        'SELECT device_id, user_agent, last_used_at FROM device_links WHERE intern_id = ? ORDER BY last_used_at DESC'
+    );
+    $statement->execute([$internId]);
+    return array_map(static fn (array $row): array => [
+        'id' => $row['device_id'],
+        'label' => deviceFriendlyLabel($row['user_agent']),
+        'lastUsedAt' => friendlyLastUsed($row['last_used_at']),
+        'isCurrent' => $row['device_id'] === $currentDeviceId,
+    ], $statement->fetchAll());
+}
+
+/**
+ * Unlink one specific device by id -- from the list, not necessarily the
+ * device making the request, mirroring "log out" from another device's
+ * session list. Ownership-checked (WHERE ... AND intern_id = ?), so this can
+ * only ever remove a device that's actually yours; it cannot be used to
+ * bump someone else off their own device. Returns whether a row actually
+ * existed to remove.
+ */
+function releaseDeviceLinkById(PDO $pdo, string $internId, string $deviceId): bool
+{
+    $statement = $pdo->prepare('DELETE FROM device_links WHERE device_id = ? AND intern_id = ?');
+    $statement->execute([$deviceId, $internId]);
+    return $statement->rowCount() > 0;
 }
 
 // ----------------------------------------------------------------------------

@@ -46,7 +46,7 @@ $routes = [
     '/api/attendance' => ['GET', 'POST'],
     '/api/leave' => ['GET', 'POST'],
     '/api/me' => ['GET'],
-    '/api/device' => ['GET', 'POST'],
+    '/api/devices' => ['GET', 'POST'],
     '/api/signout' => ['POST'],
     '/api/subscribe' => ['GET', 'POST'],
     '/api/cron-reminders' => ['GET'],
@@ -117,14 +117,17 @@ if (isset($routes[$apiPath])) {
         require __DIR__ . '/leave.php';
         exit;
     }
-    if ($apiPath === '/api/device') {
+    if ($apiPath === '/api/devices') {
         $pdo = database();
         $internId = currentInternId($pdo);
         if ($method === 'GET') {
-            sendJson(200, ['success' => true] + deviceLinkStatus($pdo, $internId));
+            sendJson(200, ['success' => true, 'devices' => internDeviceLinks($pdo, $internId)]);
         }
-        releaseDeviceLink($pdo, $internId);
-        sendJson(200, ['success' => true, 'linked' => false, 'isYou' => false]);
+        $deviceId = trim((string) (jsonInput()['deviceId'] ?? ''));
+        if ($deviceId === '' || !releaseDeviceLinkById($pdo, $internId, $deviceId)) {
+            sendError(404, 'RESOURCE_NOT_FOUND', 'That device is not linked to your account.');
+        }
+        sendJson(200, ['success' => true, 'devices' => internDeviceLinks($pdo, $internId)]);
     }
     if ($apiPath === '/api/signout') {
         // Ends this app's own session (S24 leaves sign-out itself authoritative

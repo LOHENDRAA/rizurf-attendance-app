@@ -175,3 +175,16 @@ main { max-width: none; padding: 42px 32px 58px; }.welcome-row { align-items: st
 @keyframes skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
 @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
 .profile-chip .skeleton.avatar { width: 31px; height: 31px; }
+
+/* Linked devices list, in the profile drawer. */
+.drawer-section-label { display: flex; align-items: center; gap: 6px; margin: 20px 0 4px; }
+.device-list { display: grid; gap: 2px; }
+.device-row { min-height: 58px; display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 6px; border: 0; border-radius: 9px; background: transparent; color: var(--neutral-dark); text-align: left; }
+.device-row:hover { background: var(--brand-ice); }
+.device-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--brand-teal-dark); background: var(--brand-ice); }
+.device-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.device-info strong { font-size: 13px; font-weight: 600; }
+.device-current-tag { color: var(--brand-teal-dark); font-weight: 600; }
+.device-info small { color: var(--neutral-gray); font-size: 11px; }
+.device-row > svg:last-child { flex: none; color: var(--neutral-gray); }
+.device-row:hover > svg:last-child { color: var(--status-danger); }
