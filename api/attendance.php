@@ -92,6 +92,14 @@ try {
         if ($existing['clock_out']) {
             respond(['success' => false, 'message' => 'You have already clocked out today.'], 409);
         }
+        // Clock-out mode must match clock-in mode -- otherwise Office's QR +
+        // geofence check (above) only ever applies to whichever mode happens
+        // to be submitted, so clocking in at the office and then clocking
+        // out via Hybrid skipped it entirely, with nothing to show that the
+        // record no longer actually proves an office departure.
+        if ($existing['clock_in_mode'] !== $mode) {
+            respond(['success' => false, 'message' => "You clocked in via {$existing['clock_in_mode']}. Clock out the same way."], 422);
+        }
         $update = $pdo->prepare(
             'UPDATE attendance_records
                 SET clock_out = now(), clock_out_mode = ?,

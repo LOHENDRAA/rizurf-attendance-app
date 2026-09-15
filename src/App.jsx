@@ -333,8 +333,16 @@ function App() {
   }
 
   const openAttendance = () => {
-    setModal('mode')
     setScannerError('')
+    // Clock-out must use the same mode you clocked in with -- the backend
+    // enforces this and rejects a mismatch, so there's no real choice to
+    // offer here; skip straight to whichever mode that actually is instead
+    // of showing a picker where one of the two options is guaranteed to fail.
+    if (isClockedIn && today?.mode) {
+      chooseMode(today.mode)
+      return
+    }
+    setModal('mode')
   }
 
   const openScanner = () => {
