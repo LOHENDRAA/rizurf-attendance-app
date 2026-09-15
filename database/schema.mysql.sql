@@ -131,6 +131,43 @@ CREATE TABLE IF NOT EXISTS device_links (
 
 
 -- ----------------------------------------------------------------------------
+-- push_subscriptions - one row per device that turned on clock-in/out
+-- reminders. The browser's PushSubscription (endpoint + keys) is what lets
+-- our server send it a notification even when the app isn't open; there is
+-- nothing else to correlate it with except the intern who subscribed it.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  intern_id          CHAR(36) NOT NULL,
+  endpoint           VARCHAR(500) NOT NULL,
+  p256dh             VARCHAR(255) NOT NULL,
+  auth               VARCHAR(255) NOT NULL,
+  notify_clock_in    TINYINT(1) NOT NULL DEFAULT 1,
+  notify_clock_out   TINYINT(1) NOT NULL DEFAULT 1,
+  created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY push_subscriptions_endpoint (endpoint(255)),
+  KEY push_subscriptions_intern_idx (intern_id)
+) ENGINE=InnoDB;
+
+
+-- ----------------------------------------------------------------------------
+-- reminders_sent - dedup log so the reminder cron (api/cron-reminders.php),
+-- which runs every few minutes, sends each reminder at most once per intern
+-- per day even though it re-checks everyone on every run.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS reminders_sent (
+  id              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  intern_id       CHAR(36) NOT NULL,
+  reminder_type   VARCHAR(40) NOT NULL,
+  reminder_date   DATE NOT NULL,
+  created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY reminders_sent_one_per_day (intern_id, reminder_type, reminder_date)
+) ENGINE=InnoDB;
+
+
+-- ----------------------------------------------------------------------------
 -- attendance_feed - the read model the app renders. An approved Medical
 -- Leave/MC on the same day overrides the stored status. Intern name /
 -- ref_number are merged in by the app from the Intern Database API.

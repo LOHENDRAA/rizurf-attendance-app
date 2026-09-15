@@ -1,0 +1,6 @@
+{
+    "require": {
+        "minishlink/web-push": "^9.0",
+        "php-http/guzzle7-adapter": "^1.1"
+    }
+}

@@ -10,5 +10,8 @@
   },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.php" }
+  ],
+  "crons": [
+    { "path": "/api/cron-reminders", "schedule": "*/10 * * * *" }
   ]
 }

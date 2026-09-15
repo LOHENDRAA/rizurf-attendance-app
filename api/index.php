@@ -48,8 +48,12 @@ $routes = [
     '/api/me' => ['GET'],
     '/api/device' => ['GET', 'POST'],
     '/api/signout' => ['POST'],
+    '/api/subscribe' => ['GET', 'POST'],
+    '/api/cron-reminders' => ['GET'],
 ];
-const PUBLIC_PATHS = ['/health', '/openapi.json'];
+// cron-reminders checks its own CRON_SECRET (it's Vercel's scheduler calling,
+// not a gateway-signed-in caller) rather than the normal auth below.
+const PUBLIC_PATHS = ['/health', '/openapi.json', '/api/cron-reminders'];
 
 // --- 1. The gateway sends the signed-in visitor back here with a one-time code.
 if ($path === '/' && isset($_GET['code']) && is_string($_GET['code'])) {
@@ -129,6 +133,14 @@ if (isset($routes[$apiPath])) {
         // SSO session can't silently bounce them right back into this app.
         clearAppSession();
         sendJson(200, ['success' => true, 'gatewayUrl' => rtrim(envOrFail('GATEWAY_URL'), '/') . '/']);
+    }
+    if ($apiPath === '/api/subscribe') {
+        require __DIR__ . '/subscribe.php';
+        exit;
+    }
+    if ($apiPath === '/api/cron-reminders') {
+        require __DIR__ . '/cron-reminders.php';
+        exit;
     }
 }
 
