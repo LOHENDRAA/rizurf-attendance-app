@@ -384,6 +384,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
+        <img src={theme === 'dark' ? './rizurf-logo-dark.png' : './rizurf-logo-light.png'} alt="Rizurf Realty" className="topbar-logo" />
         <div className="breadcrumbs"><span>Attendance console</span><b>/</b><strong>Dashboard</strong></div>
         <div className="topbar-actions"><span className="system-status"><i></i> All systems operational</span>{meLoaded ? <button className="profile-chip" aria-label="Open profile" onClick={() => selectTab('profile')}><span className="avatar">{initials}</span><span className="profile-name">{displayName}</span><ChevronRight size={15} /></button> : <ProfileChipSkeleton />}</div>
       </header>

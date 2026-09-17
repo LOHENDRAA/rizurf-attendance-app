@@ -188,3 +188,6 @@ main { max-width: none; padding: 42px 32px 58px; }.welcome-row { align-items: st
 .device-info small { color: var(--neutral-gray); font-size: 11px; }
 .device-row > svg:last-child { flex: none; color: var(--neutral-gray); }
 .device-row:hover > svg:last-child { color: var(--status-danger); }
+
+.topbar-logo { height: 28px; width: auto; flex: none; }
+@media (max-width: 560px) { .topbar-logo { height: 22px; } }
