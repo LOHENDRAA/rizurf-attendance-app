@@ -50,6 +50,8 @@ $routes = [
     '/api/signout' => ['POST'],
     '/api/subscribe' => ['GET', 'POST'],
     '/api/cron-reminders' => ['GET'],
+    '/api/admin/attendance' => ['GET'],
+    '/api/admin/qr' => ['GET', 'POST'],
 ];
 // cron-reminders checks its own CRON_SECRET (it's Vercel's scheduler calling,
 // not a gateway-signed-in caller) rather than the normal auth below.
@@ -143,6 +145,14 @@ if (isset($routes[$apiPath])) {
     }
     if ($apiPath === '/api/cron-reminders') {
         require __DIR__ . '/cron-reminders.php';
+        exit;
+    }
+    if ($apiPath === '/api/admin/attendance') {
+        require __DIR__ . '/admin.php';
+        exit;
+    }
+    if ($apiPath === '/api/admin/qr') {
+        require __DIR__ . '/admin-qr.php';
         exit;
     }
 }
@@ -285,7 +295,7 @@ function currentIdentity(): array
         'sub' => $session['sub'] ?? null,
         'email' => $session['email'] ?? null,
         'name' => $session['name'] ?? null,
-        'role' => $session['role'] ?? null,
+        'role' => currentRole(),
         'intern_id' => $internId,
         'intern' => $intern,
         'linked' => $intern !== null,

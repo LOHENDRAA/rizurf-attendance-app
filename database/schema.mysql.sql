@@ -173,6 +173,22 @@ CREATE TABLE IF NOT EXISTS reminders_sent (
 
 
 -- ----------------------------------------------------------------------------
+-- office_settings - single row (id is always 1) holding whatever the office
+-- QR currently is. Admin's "regenerate QR" (api/config.php's
+-- regenerateOfficeQr()) overwrites it; officeQr() reads it, falling back to
+-- the OFFICE_QR env var only if this table is empty (first run) or
+-- unreachable.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS office_settings (
+  id             TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  qr_token       VARCHAR(64) NOT NULL,
+  qr_updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  qr_updated_by  VARCHAR(320) NULL,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB;
+
+
+-- ----------------------------------------------------------------------------
 -- attendance_feed - the read model the app renders. An approved Medical
 -- Leave/MC on the same day overrides the stored status. Intern name /
 -- ref_number are merged in by the app from the Intern Database API.

@@ -456,6 +456,62 @@ function currentInternId(PDO $pdo): string
         : 'Your Rizurf account is not linked to an intern record.'], 409);
 }
 
+// ----------------------------------------------------------------------------
+// Admin -- gated on the gateway's own role claim (MICROAPP_AUTH.md S2), read
+// live from the current request's verified session, never from the
+// app_identities.role snapshot column (that's a cache for admin-side
+// queries, not an authorization source -- SS-24 already applies this
+// distinction elsewhere in this file).
+// ----------------------------------------------------------------------------
+
+function currentRole(): ?string
+{
+    $auth = $GLOBALS['auth'] ?? ['kind' => 'dev'];
+    if ($auth['kind'] === 'session') {
+        return $auth['session']['role'] ?? null;
+    }
+    // Local dev only: DEV_ROLE lets the admin panel be tested without a real
+    // gateway session. Unset/anything else -- including on the registered
+    // deployment, where DEV_ALLOW_NO_AUTH itself is off -- means no admin.
+    if ($auth['kind'] === 'dev') {
+        return env('DEV_ROLE') ?: null;
+    }
+    return null;
+}
+
+/** Ends the response with a 403 for anyone whose current role isn't admin. */
+function requireAdmin(): void
+{
+    if (currentRole() !== 'admin') {
+        respond(['success' => false, 'message' => 'Admin access required.'], 403);
+    }
+}
+
+/**
+ * Every intern's attendance for one date, newest-by-name -- the admin "all
+ * attendance" view. Names come from the Intern Database directory, not this
+ * app's own storage (SS-13 still applies: this app has no intern records
+ * of its own).
+ */
+function allAttendanceForAdmin(PDO $pdo, string $date): array
+{
+    $statement = $pdo->prepare('SELECT * FROM attendance_feed WHERE attendance_date = ?');
+    $statement->execute([$date]);
+    $directory = internDirectory();
+
+    $records = array_map(static function (array $row) use ($directory): array {
+        $record = formatRecord($row);
+        $intern = $directory[$row['intern_id']] ?? null;
+        $record['internId'] = $row['intern_id'];
+        $record['internName'] = $intern ? trim($intern['first_name'] . ' ' . $intern['last_name']) : 'Unknown intern';
+        $record['refNumber'] = $intern['ref_number'] ?? null;
+        return $record;
+    }, $statement->fetchAll());
+
+    usort($records, static fn (array $a, array $b): int => strcasecmp($a['internName'], $b['internName']));
+    return $records;
+}
+
 /**
  * The intern id for a gateway identity, from app_identities. If not linked yet,
  * resolve it from the Intern Database by email and write it back ("whatever
@@ -538,9 +594,44 @@ function officeRadiusMeters(): float
     return (float) env('OFFICE_RADIUS_METERS', '100');
 }
 
+/**
+ * The office QR's current value -- from office_settings if it's ever been
+ * set (regenerateOfficeQr() writes there), falling back to the OFFICE_QR
+ * env var otherwise (first run, before any admin has regenerated it, or the
+ * table being briefly unreachable). Cached per-request only; callers that
+ * just regenerated the QR in this same request should use the value
+ * regenerateOfficeQr() itself returned, not call this again.
+ */
 function officeQr(): string
 {
-    return env('OFFICE_QR', 'Rizurf_Attandance');
+    static $token = null;
+    if ($token !== null) {
+        return $token;
+    }
+    try {
+        $row = database()->query('SELECT qr_token FROM office_settings WHERE id = 1')->fetch();
+        if ($row) {
+            return $token = $row['qr_token'];
+        }
+    } catch (Throwable $e) {
+        error_log('[attendance-api] officeQr: ' . $e->getMessage());
+    }
+    return $token = env('OFFICE_QR', 'Rizurf_Attandance');
+}
+
+/**
+ * Admin's "regenerate QR" -- a fresh random token, persisted so it survives
+ * across requests (unlike the env var, which would need a redeploy to
+ * change). $updatedBy is who did it, purely for the audit trail.
+ */
+function regenerateOfficeQr(PDO $pdo, ?string $updatedBy): string
+{
+    $newToken = 'RZ-' . strtoupper(bin2hex(random_bytes(6)));
+    $pdo->prepare(
+        'INSERT INTO office_settings (id, qr_token, qr_updated_by) VALUES (1, ?, ?)
+         ON DUPLICATE KEY UPDATE qr_token = VALUES(qr_token), qr_updated_at = NOW(), qr_updated_by = VALUES(qr_updated_by)'
+    )->execute([$newToken, $updatedBy]);
+    return $newToken;
 }
 
 function distanceInMeters(float $latitude, float $longitude): float

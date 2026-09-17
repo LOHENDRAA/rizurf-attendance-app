@@ -5,10 +5,15 @@ import {
   ShieldCheck, Sun, X,
 } from 'lucide-react'
 import { Html5Qrcode } from 'html5-qrcode'
+import QRCode from 'qrcode'
 import './App.css'
 
 const OFFICE_ADDRESS_FALLBACK = 'First Floor, 28-1, Jln 1/116B, Sri Desa Entrepreneur Park'
-const QR_PAYLOAD = 'Rizurf_Attandance'
+// Bootstrap default only, for the brief window before /api/me resolves --
+// the real, current value (which an admin can change) is me.office.qr.
+// Using a stale hardcoded value here would make scanning fail right after
+// a regenerate, since this constant would no longer match the printed code.
+const QR_PAYLOAD_FALLBACK = 'Rizurf_Attandance'
 // Public VAPID key -- safe to expose client-side by design, it's how the
 // browser verifies a push came from our server, not a secret. Paired with
 // VAPID_PRIVATE_KEY server-side; regenerate both together or subscriptions
@@ -72,6 +77,10 @@ function App() {
   const [meLoaded, setMeLoaded] = useState(false)
   const [attendanceLoaded, setAttendanceLoaded] = useState(false)
   const [devices, setDevices] = useState([])
+  const [adminDate, setAdminDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [adminRecords, setAdminRecords] = useState([])
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [qrDataUrl, setQrDataUrl] = useState('')
   const [theme, setTheme] = useState(() => {
     const stored = localStorage.getItem('rizurf-theme')
     if (stored === 'light' || stored === 'dark') return stored
@@ -215,7 +224,7 @@ function App() {
   const completeAttendance = (mode) => {
     const now = new Date()
     const time = formatTime(now)
-    const payload = { action, mode, qrToken: mode === 'Office' ? QR_PAYLOAD : null, latitude: window.lastAttendanceLatitude || null, longitude: window.lastAttendanceLongitude || null, accuracy: window.lastAttendanceAccuracy || null }
+    const payload = { action, mode, qrToken: mode === 'Office' ? currentQr : null, latitude: window.lastAttendanceLatitude || null, longitude: window.lastAttendanceLongitude || null, accuracy: window.lastAttendanceAccuracy || null }
     fetch('./api/attendance.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       .then((response) => response.json())
       .then((data) => {
@@ -297,8 +306,8 @@ function App() {
     try {
       await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 220, height: 220 } }, (decodedText) => {
         if (scanHandledRef.current) return
-        if (decodedText.trim() !== QR_PAYLOAD) {
-          setScannerError(`QR read as “${decodedText.trim()}”, but the expected value is “${QR_PAYLOAD}”.`)
+        if (decodedText.trim() !== currentQr) {
+          setScannerError(`QR read as “${decodedText.trim()}”, but the expected value is “${currentQr}”.`)
           return
         }
         scanHandledRef.current = true
@@ -319,9 +328,9 @@ function App() {
     try {
       const decodedText = await scanner.scanFile(file, true)
       await stopScanner()
-      if (decodedText.trim() !== QR_PAYLOAD) {
+      if (decodedText.trim() !== currentQr) {
         setScanStatus('')
-        setScannerError(`QR read as “${decodedText.trim()}”, but the expected value is “${QR_PAYLOAD}”.`)
+        setScannerError(`QR read as “${decodedText.trim()}”, but the expected value is “${currentQr}”.`)
         return
       }
       verifyOfficeLocation()
@@ -373,6 +382,44 @@ function App() {
   const firstName = (intern?.first_name || me?.name || 'there').split(' ')[0]
   const initials = intern ? initialsOf(`${intern.first_name} ${intern.last_name}`) : initialsOf(me?.name)
   const officeAddress = me?.office?.address || OFFICE_ADDRESS_FALLBACK
+  const currentQr = me?.office?.qr || QR_PAYLOAD_FALLBACK
+  const isAdmin = me?.role === 'admin'
+
+  const loadAdminAttendance = (date) => {
+    setAdminLoading(true)
+    fetch(`./api/admin/attendance.php?date=${date}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.success) throw new Error(data.message)
+        setAdminRecords(data.records)
+      })
+      .catch((error) => showNotice('error', error.message || 'Could not load attendance for that date.'))
+      .finally(() => setAdminLoading(false))
+  }
+
+  /* oxlint-disable react-hooks/exhaustive-deps, react(set-state-in-effect) */
+  useEffect(() => {
+    if (isAdmin && activeTab === 'admin') loadAdminAttendance(adminDate)
+  }, [isAdmin, activeTab, adminDate])
+  /* oxlint-enable react-hooks/exhaustive-deps, react(set-state-in-effect) */
+
+  // The QR image is rendered client-side from whatever the current code
+  // actually is -- never a separate fetch, so it can never drift from what
+  // /api/me already says (and what attendance.php will actually accept).
+  useEffect(() => {
+    QRCode.toDataURL(currentQr, { margin: 1, width: 220 }).then(setQrDataUrl).catch(() => setQrDataUrl(''))
+  }, [currentQr])
+
+  const regenerateQr = () => {
+    fetch('./api/admin/qr.php', { method: 'POST' })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.success) throw new Error(data.message)
+        setMe((previous) => (previous ? { ...previous, office: { ...previous.office, qr: data.qr } } : previous))
+        showNotice('success', 'Office QR regenerated. Update the printed/displayed code now -- the old one no longer works.')
+      })
+      .catch((error) => showNotice('error', error.message || 'Could not regenerate the office QR.'))
+  }
 
   /* oxlint-disable react-hooks/exhaustive-deps, react(set-state-in-effect) */
   useEffect(() => {
@@ -401,10 +448,12 @@ function App() {
         <section className="quick-grid">{showSkeleton ? <><MetricCardSkeleton /><MetricCardSkeleton /></> : <><article className="metric-card accent-card"><div className="metric-icon"><Clock3 size={19} /></div><div><p>Late arrivals</p><strong>{history.filter((entry) => entry.status === 'Late').length} <small>times</small></strong><em>This month</em></div></article><article className="metric-card"><div className="metric-icon pale"><Clock3 size={19} /></div><div><p>Today</p><strong>{today?.clockIn || '—'} <small>{today?.clockOut ? `to ${today.clockOut}` : '/ pending'}</small></strong><em>{today?.mode || 'No attendance recorded yet'}</em></div></article></>}</section>
 
         {activeTab === 'history' && <section className="tab-panel logs-panel"><div className="tab-heading"><p className="eyebrow">ATTENDANCE LOGS</p><h1>My attendance history</h1><p>Clock-ins, clock-outs, late arrivals, and grace-period records.</p></div><article className="activity-card"><div className="history-list">{showSkeleton ? <><HistoryRowSkeleton /><HistoryRowSkeleton /><HistoryRowSkeleton /></> : history.map((entry) => <div className="history-row" key={`log-${entry.id}`}><div className="history-date"><strong>{entry.date.split(',')[0]}</strong><span>{entry.date.split(',').slice(1).join(',')}</span></div><div className="history-times"><strong>{entry.clockIn || '—'}</strong><span>{entry.clockOut ? `to ${entry.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{entry.mode}</span><span className={`status-tag ${entry.status === 'On time' ? 'green' : entry.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{entry.status}</span></div>)}</div></article></section>}
+
+        {activeTab === 'admin' && isAdmin && <section className="tab-panel admin-panel"><div className="tab-heading"><p className="eyebrow">ADMIN</p><h1>Attendance overview</h1><p>Every intern's attendance, and the office QR code.</p></div><article className="activity-card admin-qr-card"><div className="section-heading"><div><p className="eyebrow">OFFICE QR</p><h2>Current code</h2></div><button className="secondary-action" onClick={regenerateQr}><QrCode size={16} /> Regenerate</button></div>{qrDataUrl && <img src={qrDataUrl} alt="Office QR code" className="admin-qr-image" />}<p className="drawer-note">Regenerating invalidates the old code immediately -- update the printed or displayed copy at the office right away.</p></article><article className="activity-card"><div className="section-heading"><div><p className="eyebrow">ALL ATTENDANCE</p><h2>{adminDate}</h2></div><input type="date" value={adminDate} onChange={(event) => setAdminDate(event.target.value)} className="admin-date-input" /></div><div className="history-list">{adminLoading ? <p className="drawer-note">Loading...</p> : adminRecords.length === 0 ? <p className="drawer-note">No attendance recorded for this date.</p> : adminRecords.map((record) => <div className="history-row" key={record.id}><div className="history-date"><strong>{record.internName}</strong><span>{record.refNumber}</span></div><div className="history-times"><strong>{record.clockIn || '—'}</strong><span>{record.clockOut ? `to ${record.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{record.mode}</span><span className={`status-tag ${record.status === 'On time' ? 'green' : record.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{record.status}</span></div>)}</div></article></section>}
       </main>
       <footer><span>Rizurf People Ops</span><span>Attendance service <b></b> All systems operational</span></footer>
 
-      <nav className="bottom-nav" aria-label="Primary navigation"><button className={activeTab === 'home' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('home')}><Home size={21} /><span>Home</span></button><button className="nav-tab scan-tab" onClick={() => selectTab('scan')}><span className="scan-button"><ScanLine size={24} /></span><span>Scan</span></button><button className={activeTab === 'history' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('history')}><Clock3 size={21} /><span>History</span></button></nav>
+      <nav className={isAdmin ? 'bottom-nav has-admin' : 'bottom-nav'} aria-label="Primary navigation"><button className={activeTab === 'home' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('home')}><Home size={21} /><span>Home</span></button><button className="nav-tab scan-tab" onClick={() => selectTab('scan')}><span className="scan-button"><ScanLine size={24} /></span><span>Scan</span></button><button className={activeTab === 'history' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('history')}><Clock3 size={21} /><span>History</span></button>{isAdmin && <button className={activeTab === 'admin' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('admin')}><ShieldCheck size={21} /><span>Admin</span></button>}</nav>
 
       {modal && <div className="modal-backdrop" role="presentation" onClick={(event) => event.target === event.currentTarget && setModal(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="attendance-modal-title"><button className="modal-close" aria-label="Close" onClick={() => setModal(null)}><X size={18} /></button>{modal === 'mode' ? <><div className="modal-icon"><Clock3 size={22} /></div><p className="eyebrow">CLOCK {action.toUpperCase()}</p><h2 id="attendance-modal-title">How are you working today?</h2><p className="modal-subtitle">We will verify your attendance based on where you are.</p><div className="mode-options"><button className="mode-option" onClick={() => chooseMode('Office')}><span className="mode-icon office"><QrCode size={21} /></span><span><strong>At the office</strong><small>Scan QR and verify within 100m</small></span><ChevronRight size={17} /></button><button className="mode-option" onClick={() => chooseMode('Hybrid')}><span className="mode-icon hybrid"><MapPin size={21} /></span><span><strong>Hybrid / away</strong><small>Clock {action} without office QR</small></span><ChevronRight size={17} /></button></div></> : <><div className="modal-icon"><QrCode size={22} /></div><p className="eyebrow">OFFICE QR VERIFICATION</p><h2 id="attendance-modal-title">Scan the office QR</h2><p className="modal-subtitle">Scan the QR code provided by Rizurf, then stay within 100m while location is checked.</p><div id="qr-reader" className="qr-reader"></div>{scanStatus && <p className="scanner-status">{scanStatus}</p>}{scannerError && <p className="scanner-error">{scannerError}</p>}<label className="upload-qr"><FileScan size={16} /> Use a QR image<input type="file" accept="image/*" capture="environment" onChange={scanQrImage} /></label><button className="text-button cancel-scan" onClick={() => setModal(null)}>Cancel scan</button></>}</div></div>}
       {profileOpen && <div className="profile-backdrop" onClick={(event) => event.target === event.currentTarget && setProfileOpen(false)}><aside className="profile-drawer"><button className="drawer-close" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={19} /></button><div className="drawer-avatar">{initials}</div><p className="eyebrow">INTERN PROFILE</p><h2>{displayName}</h2><div className="credential-list"><div><span>Rizurf account</span><strong>{me?.email || '—'}</strong></div></div><div className="drawer-setting"><span><Bell size={18} /> Clock in/out reminder</span><button className={notificationsEnabled ? 'toggle is-on' : 'toggle'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><i></i></button></div><div className="drawer-setting"><span>{theme === 'dark' ? <Moon size={18} /> : <Sun size={18} />} Dark mode</span><button className={theme === 'dark' ? 'toggle is-on' : 'toggle'} aria-pressed={theme === 'dark'} onClick={toggleTheme}><i></i></button></div><p className="eyebrow drawer-section-label"><ShieldCheck size={14} /> LINKED DEVICES</p>{devices.length > 0 ? <div className="device-list">{devices.map((d) => <button key={d.id} className="device-row" onClick={() => unlinkDevice(d.id)}><span className="device-icon"><Smartphone size={17} /></span><span className="device-info"><strong>{d.label}{d.isCurrent && <span className="device-current-tag"> · This device</span>}</strong><small>Last active {d.lastUsedAt}</small></span><X size={15} /></button>)}</div> : <p className="drawer-note">No devices linked yet. The first time you clock in, this device links to you -- after that, no one else can clock in from it.</p>}<button className="drawer-setting drawer-action logout-button" onClick={signOut}><LogOut size={18} /> Sign out</button><p className="drawer-note">Ends your session in this app and takes you to the Rizurf gateway. If you're still signed in there, opening this app again may sign you straight back in.</p></aside></div>}
