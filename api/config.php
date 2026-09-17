@@ -355,13 +355,15 @@ function departmentDirectory(): array
     $byId = [];
     $ttl = 60; // unreachable -- don't retry on every request for a minute
     try {
-        $base = rtrim(env('DEPARTMENT_API_URL', 'https://department-api.vercel.app'), '/');
+        $base = rtrim(env('DEPARTMENT_API_URL', 'https://department-zeta.vercel.app'), '/');
         [$status, $body] = httpJson('GET', "$base/api/departments", [
             'Authorization: Bearer ' . departmentApiToken(),
             'Accept: application/json',
         ], null, 4);
-        if ($status === 200 && is_array($body['data'] ?? null)) {
-            foreach ($body['data'] as $department) {
+        // The service returns a bare JSON array, not {"data": [...]}.
+        $list = is_array($body) ? (array_is_list($body) ? $body : ($body['data'] ?? null)) : null;
+        if ($status === 200 && is_array($list)) {
+            foreach ($list as $department) {
                 if (isset($department['id'])) {
                     $byId[$department['id']] = (string) ($department['name'] ?? $department['id']);
                 }
