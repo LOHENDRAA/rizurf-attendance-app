@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Bell, Briefcase, Check, ChevronRight, Clock3, FileScan,
+  Bell, Briefcase, Check, ChevronRight, Clock3, Download, FileScan,
   Home, LogOut, MapPin, Moon, QrCode, ScanLine, Smartphone,
   ShieldCheck, Sun, X,
 } from 'lucide-react'
@@ -421,6 +421,20 @@ function App() {
       .catch((error) => showNotice('error', error.message || 'Could not regenerate the office QR.'))
   }
 
+  // A larger, print-friendly render of the same code the admin is currently
+  // looking at -- generated on demand rather than reusing the 220px on-screen
+  // image, so the saved file still looks sharp at office-sign size.
+  const downloadQr = () => {
+    QRCode.toDataURL(currentQr, { margin: 2, width: 512 })
+      .then((url) => {
+        const link = document.createElement('a')
+        link.href = url
+        link.download = `rizurf-office-qr-${new Date().toISOString().slice(0, 10)}.png`
+        link.click()
+      })
+      .catch(() => showNotice('error', 'Could not save the QR image.'))
+  }
+
   /* oxlint-disable react-hooks/exhaustive-deps, react(set-state-in-effect) */
   useEffect(() => {
     if (modal === 'scan') startScanner()
@@ -449,7 +463,7 @@ function App() {
 
         {activeTab === 'history' && <section className="tab-panel logs-panel"><div className="tab-heading"><p className="eyebrow">ATTENDANCE LOGS</p><h1>My attendance history</h1><p>Clock-ins, clock-outs, late arrivals, and grace-period records.</p></div><article className="activity-card"><div className="history-list">{showSkeleton ? <><HistoryRowSkeleton /><HistoryRowSkeleton /><HistoryRowSkeleton /></> : history.map((entry) => <div className="history-row" key={`log-${entry.id}`}><div className="history-date"><strong>{entry.date.split(',')[0]}</strong><span>{entry.date.split(',').slice(1).join(',')}</span></div><div className="history-times"><strong>{entry.clockIn || '—'}</strong><span>{entry.clockOut ? `to ${entry.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{entry.mode}</span><span className={`status-tag ${entry.status === 'On time' ? 'green' : entry.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{entry.status}</span></div>)}</div></article></section>}
 
-        {activeTab === 'admin' && isAdmin && <section className="tab-panel admin-panel"><div className="tab-heading"><p className="eyebrow">ADMIN</p><h1>Attendance overview</h1><p>Every intern's attendance, and the office QR code.</p></div><article className="activity-card admin-qr-card"><div className="section-heading"><div><p className="eyebrow">OFFICE QR</p><h2>Current code</h2></div><button className="secondary-action" onClick={regenerateQr}><QrCode size={16} /> Regenerate</button></div>{qrDataUrl && <img src={qrDataUrl} alt="Office QR code" className="admin-qr-image" />}<p className="drawer-note">Regenerating invalidates the old code immediately -- update the printed or displayed copy at the office right away.</p></article><article className="activity-card"><div className="section-heading"><div><p className="eyebrow">ALL ATTENDANCE</p><h2>{adminDate}</h2></div><input type="date" value={adminDate} onChange={(event) => setAdminDate(event.target.value)} className="admin-date-input" /></div><div className="history-list">{adminLoading ? <p className="drawer-note">Loading...</p> : adminRecords.length === 0 ? <p className="drawer-note">No attendance recorded for this date.</p> : adminRecords.map((record) => <div className="history-row" key={record.id}><div className="history-date"><strong>{record.internName}</strong><span>{record.refNumber}</span></div><div className="history-times"><strong>{record.clockIn || '—'}</strong><span>{record.clockOut ? `to ${record.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{record.mode}</span><span className={`status-tag ${record.status === 'On time' ? 'green' : record.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{record.status}</span></div>)}</div></article></section>}
+        {activeTab === 'admin' && isAdmin && <section className="tab-panel admin-panel"><div className="tab-heading"><p className="eyebrow">ADMIN</p><h1>Attendance overview</h1><p>Every intern's attendance, and the office QR code.</p></div><article className="activity-card admin-qr-card"><div className="section-heading"><div><p className="eyebrow">OFFICE QR</p><h2>Current code</h2></div><div className="admin-qr-actions"><button className="secondary-action" onClick={downloadQr}><Download size={16} /> Save QR</button><button className="secondary-action" onClick={regenerateQr}><QrCode size={16} /> Regenerate</button></div></div>{qrDataUrl && <img src={qrDataUrl} alt="Office QR code" className="admin-qr-image" />}<p className="drawer-note">Regenerating invalidates the old code immediately -- update the printed or displayed copy at the office right away.</p></article><article className="activity-card"><div className="section-heading"><div><p className="eyebrow">ALL ATTENDANCE</p><h2>{adminDate}</h2></div><input type="date" value={adminDate} onChange={(event) => setAdminDate(event.target.value)} className="admin-date-input" /></div><div className="history-list">{adminLoading ? <p className="drawer-note">Loading...</p> : adminRecords.length === 0 ? <p className="drawer-note">No attendance recorded for this date.</p> : adminRecords.map((record) => <div className="history-row" key={record.id}><div className="history-date"><strong>{record.internName}</strong><span>{record.refNumber}</span></div><div className="history-times"><strong>{record.clockIn || '—'}</strong><span>{record.clockOut ? `to ${record.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{record.mode}</span><span className={`status-tag ${record.status === 'On time' ? 'green' : record.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{record.status}</span></div>)}</div></article></section>}
       </main>
       <footer><span>Rizurf People Ops</span><span>Attendance service <b></b> All systems operational</span></footer>
 
