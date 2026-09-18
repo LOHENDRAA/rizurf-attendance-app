@@ -36,8 +36,8 @@ self.addEventListener('push', (event) => {
 
   event.waitUntil(self.registration.showNotification(data.title, {
     body: data.body,
-    icon: './favicon.svg',
-    badge: './favicon.svg',
+    icon: './rizurf-icon-512.png',
+    badge: './rizurf-icon-512.png',
   }))
 })
 

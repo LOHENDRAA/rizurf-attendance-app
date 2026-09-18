@@ -4,4 +4,5 @@ RewriteEngine On
 RewriteRule ^assets/(.*)$ dist/assets/$1 [L]
 RewriteRule ^manifest\.webmanifest$ public/manifest.webmanifest [L]
 RewriteRule ^sw\.js$ public/sw.js [L]
-RewriteRule ^favicon\.svg$ public/favicon.svg [L]
+RewriteRule ^rizurf-icon-512\.png$ public/rizurf-icon-512.png [L]
+RewriteRule ^apple-touch-icon\.png$ public/apple-touch-icon.png [L]
