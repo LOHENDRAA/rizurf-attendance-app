@@ -2,14 +2,14 @@
 
 require_once __DIR__ . '/config.php';
 
-// TEMPORARY: production has been returning a bare 500 here with 6ms
-// execution and zero outgoing requests -- i.e. it dies before ever reaching
-// the database, consistent with this require itself failing. Naming the
-// exact failure instead of falling through to the generic handler, so the
-// next cron run (or a manual call) says what's actually wrong instead of
-// requiring a trip through Vercel's function logs.
+// api/vendor is committed to git (see .gitignore) rather than left for the
+// vercel-php runtime to `composer install` at build time -- confirmed via
+// production returning a bare 500 with 6ms execution and zero outgoing
+// requests (dying before ever reaching the database) that the runtime
+// wasn't reliably installing it for this nested api/ directory. This check
+// stays as a guard so a regression names itself instead of a generic 500.
 if (!is_file(__DIR__ . '/vendor/autoload.php')) {
-    sendError(500, 'SERVER_MISCONFIGURED', 'api/vendor/autoload.php is missing from this deployment -- composer dependencies were not installed for api/.');
+    sendError(500, 'SERVER_MISCONFIGURED', 'api/vendor/autoload.php is missing from this deployment.');
 }
 require_once __DIR__ . '/vendor/autoload.php';
 
