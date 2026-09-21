@@ -1,6 +1,16 @@
 <?php
 
 require_once __DIR__ . '/config.php';
+
+// TEMPORARY: production has been returning a bare 500 here with 6ms
+// execution and zero outgoing requests -- i.e. it dies before ever reaching
+// the database, consistent with this require itself failing. Naming the
+// exact failure instead of falling through to the generic handler, so the
+// next cron run (or a manual call) says what's actually wrong instead of
+// requiring a trip through Vercel's function logs.
+if (!is_file(__DIR__ . '/vendor/autoload.php')) {
+    sendError(500, 'SERVER_MISCONFIGURED', 'api/vendor/autoload.php is missing from this deployment -- composer dependencies were not installed for api/.');
+}
 require_once __DIR__ . '/vendor/autoload.php';
 
 use Minishlink\WebPush\WebPush;
