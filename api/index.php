@@ -57,6 +57,17 @@ $routes = [
 // not a gateway-signed-in caller) rather than the normal auth below.
 const PUBLIC_PATHS = ['/health', '/openapi.json', '/api/cron-reminders'];
 
+// These exist only to let a signed-in person manage their own identity/
+// devices/notifications -- there's no legitimate service-to-service caller
+// for "who am I" or "unlink my device", unlike /api/attendance and
+// /api/leave, which are genuinely meant to be called by other services
+// (hence their scoped entries in openapi.php). None of these three appear
+// in the OpenAPI document at all, so requiredScopes() would otherwise
+// return [] for them and let a token with *any* (or no) scope through --
+// rejecting token auth outright here closes that instead of inventing
+// scopes for a use case that was never meant to exist.
+const SESSION_ONLY_PATHS = ['/api/me', '/api/devices', '/api/subscribe'];
+
 // --- 1. The gateway sends the signed-in visitor back here with a one-time code.
 if ($path === '/' && isset($_GET['code']) && is_string($_GET['code'])) {
     handleGatewayCallback((string) $_GET['code']);
@@ -76,6 +87,9 @@ if (isset($routes[$apiPath])) {
         $auth = authenticate();
         if ($auth === null) {
             sendError(401, 'UNAUTHORIZED', 'A valid bearer token or app session is required.');
+        }
+        if ($auth['kind'] === 'token' && in_array($apiPath, SESSION_ONLY_PATHS, true)) {
+            sendError(403, 'FORBIDDEN', 'This endpoint is for signed-in users only, not service-to-service tokens.');
         }
         if ($auth['kind'] === 'token') {
             $required = requiredScopes($apiPath, $method);
