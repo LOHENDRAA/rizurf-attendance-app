@@ -51,6 +51,7 @@ $routes = [
     '/api/subscribe' => ['GET', 'POST'],
     '/api/cron-reminders' => ['GET'],
     '/api/admin/attendance' => ['GET'],
+    '/api/admin/attendance-calendar' => ['GET'],
     '/api/admin/qr' => ['GET', 'POST'],
 ];
 // cron-reminders checks its own CRON_SECRET (it's Vercel's scheduler calling,
@@ -163,6 +164,10 @@ if (isset($routes[$apiPath])) {
     }
     if ($apiPath === '/api/admin/attendance') {
         require __DIR__ . '/admin.php';
+        exit;
+    }
+    if ($apiPath === '/api/admin/attendance-calendar') {
+        require __DIR__ . '/admin-calendar.php';
         exit;
     }
     if ($apiPath === '/api/admin/qr') {

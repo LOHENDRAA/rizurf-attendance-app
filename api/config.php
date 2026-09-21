@@ -515,6 +515,28 @@ function allAttendanceForAdmin(PDO $pdo, string $date): array
 }
 
 /**
+ * Per-day attendance and late counts for every day in [start, end] that has
+ * at least one record -- one aggregated query for the whole visible month,
+ * not one query per day, so the admin calendar's badges stay cheap however
+ * many days it shows.
+ */
+function attendanceSummaryForAdmin(PDO $pdo, string $start, string $end): array
+{
+    $statement = $pdo->prepare(
+        "SELECT attendance_date, COUNT(*) AS total, SUM(effective_status = 'Late') AS late
+         FROM attendance_feed
+         WHERE attendance_date BETWEEN ? AND ?
+         GROUP BY attendance_date"
+    );
+    $statement->execute([$start, $end]);
+    return array_map(static fn (array $row): array => [
+        'date' => $row['attendance_date'],
+        'total' => (int) $row['total'],
+        'late' => (int) $row['late'],
+    ], $statement->fetchAll());
+}
+
+/**
  * The intern id for a gateway identity, from app_identities. If not linked yet,
  * resolve it from the Intern Database by email and write it back ("whatever
  * email the gateway signs in with auto-syncs to this app"). Returns the soft

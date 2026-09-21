@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Bell, Briefcase, Check, ChevronRight, Clock3, Download, FileScan,
+  Bell, Briefcase, Check, ChevronLeft, ChevronRight, Clock3, Download, FileScan,
   Home, LogOut, MapPin, Moon, QrCode, ScanLine, Smartphone,
   ShieldCheck, Sun, X,
 } from 'lucide-react'
@@ -37,6 +37,32 @@ function formatTime(date) {
 
 function formatDate(date) {
   return date.toLocaleDateString([], { weekday: 'short', month: 'short', day: '2-digit' })
+}
+
+function todayIsoDate() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+function formatMonthLabel(monthStr) {
+  const [year, month] = monthStr.split('-').map(Number)
+  return new Date(year, month - 1, 1).toLocaleDateString([], { month: 'long', year: 'numeric' })
+}
+
+// Weeks of a calendar month grid, Sunday-first, with null placeholders so
+// the first/last week still line up under the right weekday columns.
+function buildMonthGrid(monthStr) {
+  const [year, month] = monthStr.split('-').map(Number)
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const startWeekday = new Date(year, month - 1, 1).getDay()
+  const cells = Array(startWeekday).fill(null)
+  for (let day = 1; day <= daysInMonth; day++) {
+    cells.push(`${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`)
+  }
+  while (cells.length % 7 !== 0) cells.push(null)
+  const weeks = []
+  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7))
+  return weeks
 }
 
 function SkeletonLine({ width, height = 14, style }) {
@@ -77,9 +103,11 @@ function App() {
   const [meLoaded, setMeLoaded] = useState(false)
   const [attendanceLoaded, setAttendanceLoaded] = useState(false)
   const [devices, setDevices] = useState([])
-  const [adminDate, setAdminDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [adminDate, setAdminDate] = useState(todayIsoDate)
   const [adminRecords, setAdminRecords] = useState([])
   const [adminLoading, setAdminLoading] = useState(false)
+  const [adminCalendarMonth, setAdminCalendarMonth] = useState(() => todayIsoDate().slice(0, 7))
+  const [adminCalendarDays, setAdminCalendarDays] = useState([])
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [avatarFailed, setAvatarFailed] = useState(false)
   const [theme, setTheme] = useState(() => {
@@ -425,11 +453,34 @@ function App() {
       .finally(() => setAdminLoading(false))
   }
 
+  const loadAdminCalendar = (month) => {
+    fetch(`./api/admin/attendance-calendar.php?month=${month}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.success) throw new Error(data.message)
+        setAdminCalendarDays(data.days)
+      })
+      .catch(() => {}) // best-effort -- day badges just stay empty, the list below still works
+  }
+
+  const shiftAdminMonth = (delta) => {
+    const [year, month] = adminCalendarMonth.split('-').map(Number)
+    const next = new Date(year, month - 1 + delta, 1)
+    setAdminCalendarMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`)
+  }
+
   /* oxlint-disable react-hooks/exhaustive-deps, react(set-state-in-effect) */
   useEffect(() => {
     if (isAdmin && activeTab === 'admin') loadAdminAttendance(adminDate)
   }, [isAdmin, activeTab, adminDate])
+  useEffect(() => {
+    if (isAdmin && activeTab === 'admin') loadAdminCalendar(adminCalendarMonth)
+  }, [isAdmin, activeTab, adminCalendarMonth])
   /* oxlint-enable react-hooks/exhaustive-deps, react(set-state-in-effect) */
+
+  const adminCalendarWeeks = buildMonthGrid(adminCalendarMonth)
+  const adminCalendarByDate = Object.fromEntries(adminCalendarDays.map((day) => [day.date, day]))
+  const todayDate = todayIsoDate()
 
   // The QR image is rendered client-side from whatever the current code
   // actually is -- never a separate fetch, so it can never drift from what
@@ -496,7 +547,7 @@ function App() {
 
         {activeTab === 'history' && <section className="tab-panel logs-panel"><div className="tab-heading"><p className="eyebrow">ATTENDANCE LOGS</p><h1>My attendance history</h1><p>Clock-ins, clock-outs, late arrivals, and grace-period records.</p></div><article className="activity-card"><div className="history-list">{showSkeleton ? <><HistoryRowSkeleton /><HistoryRowSkeleton /><HistoryRowSkeleton /></> : history.map((entry) => <div className="history-row" key={`log-${entry.id}`}><div className="history-date"><strong>{entry.date.split(',')[0]}</strong><span>{entry.date.split(',').slice(1).join(',')}</span></div><div className="history-times"><strong>{entry.clockIn || '—'}</strong><span>{entry.clockOut ? `to ${entry.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{entry.mode}</span><span className={`status-tag ${entry.status === 'On time' ? 'green' : entry.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{entry.status}</span></div>)}</div></article></section>}
 
-        {activeTab === 'admin' && isAdmin && <section className="tab-panel admin-panel"><div className="tab-heading"><p className="eyebrow">ADMIN</p><h1>Attendance overview</h1><p>Every intern's attendance, and the office QR code.</p></div><article className="activity-card admin-qr-card"><div className="section-heading"><div><p className="eyebrow">OFFICE QR</p><h2>Current code</h2></div><div className="admin-qr-actions"><button className="secondary-action" onClick={downloadQr}><Download size={16} /> Save QR</button><button className="secondary-action" onClick={regenerateQr}><QrCode size={16} /> Regenerate</button></div></div>{qrDataUrl && <img src={qrDataUrl} alt="Office QR code" className="admin-qr-image" />}<p className="drawer-note">Regenerating invalidates the old code immediately -- update the printed or displayed copy at the office right away.</p></article><article className="activity-card"><div className="section-heading"><div><p className="eyebrow">ALL ATTENDANCE</p><h2>{adminDate}</h2></div><input type="date" value={adminDate} onChange={(event) => setAdminDate(event.target.value)} className="admin-date-input" /></div><div className="history-list">{adminLoading ? <p className="drawer-note">Loading...</p> : adminRecords.length === 0 ? <p className="drawer-note">No attendance recorded for this date.</p> : adminRecords.map((record) => <div className="history-row" key={record.id}><div className="history-date"><strong>{record.internName}</strong><span>{record.refNumber}</span></div><div className="history-times"><strong>{record.clockIn || '—'}</strong><span>{record.clockOut ? `to ${record.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{record.mode}</span><span className={`status-tag ${record.status === 'On time' ? 'green' : record.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{record.status}</span></div>)}</div></article></section>}
+        {activeTab === 'admin' && isAdmin && <section className="tab-panel admin-panel"><div className="tab-heading"><p className="eyebrow">ADMIN</p><h1>Attendance overview</h1><p>Every intern's attendance, and the office QR code.</p></div><article className="activity-card admin-qr-card"><div className="section-heading"><div><p className="eyebrow">OFFICE QR</p><h2>Current code</h2></div><div className="admin-qr-actions"><button className="secondary-action" onClick={downloadQr}><Download size={16} /> Save QR</button><button className="secondary-action" onClick={regenerateQr}><QrCode size={16} /> Regenerate</button></div></div>{qrDataUrl && <img src={qrDataUrl} alt="Office QR code" className="admin-qr-image" />}<p className="drawer-note">Regenerating invalidates the old code immediately -- update the printed or displayed copy at the office right away.</p></article><article className="activity-card"><div className="section-heading"><div><p className="eyebrow">ALL ATTENDANCE</p><h2>{adminDate}</h2></div></div><div className="admin-calendar"><div className="admin-calendar-header"><button className="icon-button" aria-label="Previous month" onClick={() => shiftAdminMonth(-1)}><ChevronLeft size={18} /></button><strong>{formatMonthLabel(adminCalendarMonth)}</strong><button className="icon-button" aria-label="Next month" onClick={() => shiftAdminMonth(1)}><ChevronRight size={18} /></button></div><div className="admin-calendar-weekdays"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div className="admin-calendar-grid">{adminCalendarWeeks.map((week, weekIndex) => week.map((date, dayIndex) => date ? <button key={date} className={`admin-calendar-day${date === adminDate ? ' selected' : ''}${date === todayDate ? ' is-today' : ''}`} onClick={() => setAdminDate(date)}><span className="admin-calendar-daynum">{Number(date.slice(8, 10))}</span>{adminCalendarByDate[date] && <span className="admin-calendar-count">{adminCalendarByDate[date].total}</span>}{adminCalendarByDate[date]?.late > 0 && <span className="admin-calendar-late-dot" title={`${adminCalendarByDate[date].late} late`}></span>}</button> : <span key={`${weekIndex}-${dayIndex}`} className="admin-calendar-day empty"></span>))}</div></div><div className="history-list">{adminLoading ? <p className="drawer-note">Loading...</p> : adminRecords.length === 0 ? <p className="drawer-note">No attendance recorded for this date.</p> : adminRecords.map((record) => <div className="history-row" key={record.id}><div className="history-date"><strong>{record.internName}</strong><span>{record.refNumber}</span></div><div className="history-times"><strong>{record.clockIn || '—'}</strong><span>{record.clockOut ? `to ${record.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{record.mode}</span><span className={`status-tag ${record.status === 'On time' ? 'green' : record.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{record.status}</span></div>)}</div></article></section>}
       </main>
       <footer><span>Rizurf People Ops</span><span>Attendance service <b></b> All systems operational</span></footer>
 
