@@ -304,19 +304,45 @@ function App() {
     }
     const scanner = new Html5Qrcode('qr-reader')
     scannerRef.current = scanner
+    const config = { fps: 10, qrbox: { width: 220, height: 220 } }
+    const onDecoded = (decodedText) => {
+      if (scanHandledRef.current) return
+      if (decodedText.trim() !== currentQr) {
+        setScannerError(`QR read as “${decodedText.trim()}”, but the expected value is “${currentQr}”.`)
+        return
+      }
+      scanHandledRef.current = true
+      stopScanner()
+      verifyOfficeLocation()
+    }
+
     try {
-      await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 220, height: 220 } }, (decodedText) => {
-        if (scanHandledRef.current) return
-        if (decodedText.trim() !== currentQr) {
-          setScannerError(`QR read as “${decodedText.trim()}”, but the expected value is “${currentQr}”.`)
-          return
-        }
-        scanHandledRef.current = true
-        stopScanner()
-        verifyOfficeLocation()
-      }, () => {})
-    } catch {
-      setScannerError('Camera access was blocked. Allow camera permission for this site, or use the QR image upload below.')
+      await scanner.start({ facingMode: 'environment' }, config, onDecoded, () => {})
+      return
+    } catch (error) {
+      if (error?.name === 'NotAllowedError') {
+        setScannerError('Camera access was blocked. Allow camera permission for this site, or use the QR image upload below.')
+        return
+      }
+      // Some Android browsers (seen on Honor/Huawei devices) reject a bare
+      // facingMode constraint outright -- before ever prompting for
+      // permission -- because they can't resolve which physical camera
+      // satisfies it. Falling back to an explicit camera id, picked from
+      // the device's own enumeration, is html5-qrcode's own documented
+      // workaround for this exact class of device.
+    }
+    try {
+      const cameras = await Html5Qrcode.getCameras()
+      if (!cameras.length) {
+        setScannerError('No camera was found on this device. Use the QR image upload below or choose Hybrid.')
+        return
+      }
+      const rearCamera = cameras.find((camera) => /back|rear|environment/i.test(camera.label)) || cameras[cameras.length - 1]
+      await scanner.start(rearCamera.id, config, onDecoded, () => {})
+    } catch (error) {
+      setScannerError(error?.name === 'NotAllowedError'
+        ? 'Camera access was blocked. Allow camera permission for this site, or use the QR image upload below.'
+        : 'Could not start the camera on this device. Use the QR image upload below or choose Hybrid.')
     }
   }
 
