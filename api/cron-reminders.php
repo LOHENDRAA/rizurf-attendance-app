@@ -28,9 +28,12 @@ use Minishlink\WebPush\Subscription;
 //
 // Vercel Cron schedules are always UTC, never the app's APP_TIMEZONE. With
 // the .env.example defaults (Asia/Kuala_Lumpur, UTC+8):
-//   "10 1 * * *"  -> 09:10 MYT, matching REMINDER_CLOCK_IN_DEADLINE
-//   "50 9 * * *"  -> 17:50 MYT, inside the 17:45-18:00 REMINDER_SHIFT_END
-//                    window with a few minutes of margin either side
+//   "0 1 * * *"   -> 09:00 MYT, matching REMINDER_CLOCK_IN_DEADLINE
+//   "0 10 * * *"  -> 18:00 MYT, matching REMINDER_SHIFT_END itself -- the
+//                    clock-out window's upper bound gets a few minutes of
+//                    grace past shift end (below) so a cron scheduled right
+//                    at the boundary isn't missed by a few seconds of
+//                    serverless execution delay.
 // Change REMINDER_CLOCK_IN_DEADLINE / REMINDER_SHIFT_END and these two
 // schedules need updating by hand to match -- they aren't read from env.
 // ============================================================================
@@ -106,7 +109,7 @@ foreach ($internIds as $internId) {
     $todayStatement->execute([$internId, $today]);
     $todayRecord = $todayStatement->fetch();
 
-    $clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_CLOCK_IN_DEADLINE', '09:10'));
+    $clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_CLOCK_IN_DEADLINE', '09:00'));
     if ($now >= $clockInDeadline && !$todayRecord && !reminderAlreadySentToday($pdo, $internId, 'clock_in')) {
         sendReminderPush($webPush, $pdo, $internId, "Don't forget to clock in", "You haven't clocked in yet today.", 'notify_clock_in');
         markReminderSent($pdo, $internId, 'clock_in');
@@ -115,7 +118,11 @@ foreach ($internIds as $internId) {
 
     $shiftEnd = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_SHIFT_END', '18:00'));
     $reminderWindowStart = (clone $shiftEnd)->modify('-' . (int) env('REMINDER_LEAD_MINUTES', '15') . ' minutes');
-    if ($now >= $reminderWindowStart && $now <= $shiftEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out']
+    // A few minutes of grace past shift end -- the cron is scheduled for
+    // exactly this moment, and a strict "<= shiftEnd" would miss the window
+    // entirely if the function takes even a few seconds to start running.
+    $reminderWindowEnd = (clone $shiftEnd)->modify('+5 minutes');
+    if ($now >= $reminderWindowStart && $now <= $reminderWindowEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out']
         && !reminderAlreadySentToday($pdo, $internId, 'clock_out')) {
         sendReminderPush($webPush, $pdo, $internId, 'Shift ending soon', 'Remember to clock out before you leave.', 'notify_clock_out');
         markReminderSent($pdo, $internId, 'clock_out');
