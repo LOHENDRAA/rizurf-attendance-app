@@ -18,6 +18,20 @@ try {
                 'today' => null,
             ]);
         }
+        $month = trim((string) ($_GET['month'] ?? ''));
+        if ($month !== '') {
+            $parsed = DateTime::createFromFormat('Y-m-d', "$month-01");
+            if (!$parsed || $parsed->format('Y-m') !== $month) {
+                respond(['success' => false, 'message' => 'Invalid month.'], 422);
+            }
+            respond([
+                'success' => true,
+                'linked' => true,
+                'month' => $month,
+                'records' => attendanceForInternMonth($pdo, $internId, $parsed->format('Y-m-01'), $parsed->format('Y-m-t')),
+            ]);
+        }
+
         respond([
             'success' => true,
             'linked' => true,

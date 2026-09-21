@@ -520,15 +520,20 @@ function allAttendanceForAdmin(PDO $pdo, string $date): array
  * not one query per day, so the admin calendar's badges stay cheap however
  * many days it shows.
  */
-function attendanceSummaryForAdmin(PDO $pdo, string $start, string $end): array
+function attendanceSummaryForAdmin(PDO $pdo, string $start, string $end, ?string $internId = null): array
 {
-    $statement = $pdo->prepare(
-        "SELECT attendance_date, COUNT(*) AS total, SUM(effective_status = 'Late') AS late
-         FROM attendance_feed
-         WHERE attendance_date BETWEEN ? AND ?
-         GROUP BY attendance_date"
-    );
-    $statement->execute([$start, $end]);
+    $sql = "SELECT attendance_date, COUNT(*) AS total, SUM(effective_status = 'Late') AS late
+            FROM attendance_feed
+            WHERE attendance_date BETWEEN ? AND ?";
+    $params = [$start, $end];
+    if ($internId !== null) {
+        $sql .= ' AND intern_id = ?';
+        $params[] = $internId;
+    }
+    $sql .= ' GROUP BY attendance_date';
+
+    $statement = $pdo->prepare($sql);
+    $statement->execute($params);
     return array_map(static fn (array $row): array => [
         'date' => $row['attendance_date'],
         'total' => (int) $row['total'],
@@ -677,6 +682,7 @@ function formatRecord(array $record): array
 {
     return [
         'id' => (string) $record['id'],
+        'rawDate' => $record['attendance_date'],
         'date' => date('D, M d', strtotime($record['attendance_date'])),
         'clockIn' => $record['clock_in'] ? date('h:i A', strtotime($record['clock_in'])) : '',
         'clockOut' => $record['clock_out'] ? date('h:i A', strtotime($record['clock_out'])) : '',
@@ -692,6 +698,16 @@ function currentRecords(PDO $pdo, string $internId): array
         'SELECT * FROM attendance_feed WHERE intern_id = ? ORDER BY attendance_date DESC LIMIT 30'
     );
     $statement->execute([$internId]);
+    return array_map('formatRecord', $statement->fetchAll());
+}
+
+/** One intern's own records for a given month -- powers their history calendar. */
+function attendanceForInternMonth(PDO $pdo, string $internId, string $start, string $end): array
+{
+    $statement = $pdo->prepare(
+        'SELECT * FROM attendance_feed WHERE intern_id = ? AND attendance_date BETWEEN ? AND ? ORDER BY attendance_date'
+    );
+    $statement->execute([$internId, $start, $end]);
     return array_map('formatRecord', $statement->fetchAll());
 }
 

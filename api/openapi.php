@@ -130,9 +130,15 @@ function openapiDocument(): array
                             'schema' => ['type' => 'string'],
                             'description' => 'Alternative to intern_id: the INT-#### reference number.',
                         ],
+                        [
+                            'name' => 'month', 'in' => 'query', 'required' => false,
+                            'schema' => ['type' => 'string', 'pattern' => '^\\d{4}-\\d{2}$'],
+                            'description' => 'YYYY-MM. Returns every record in that month instead of the '
+                                . 'last 30 and omits today\'s record -- powers the history calendar.',
+                        ],
                     ],
                     'responses' => [
-                        '200' => ['description' => 'Recent records and today\'s record.'],
+                        '200' => ['description' => 'Recent records and today\'s record, or a month\'s records.'],
                         '401' => ['description' => 'Missing or invalid token.'],
                     ],
                     'x-rizurf' => [
