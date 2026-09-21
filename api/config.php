@@ -225,7 +225,7 @@ function internDbGet(string $path): array
 function mockInternDirectory(): array
 {
     $interns = [
-        ['id' => '11111111-1111-4111-8111-111111111111', 'ref_number' => 'INT-0007', 'first_name' => 'Alex', 'last_name' => 'Morgan', 'email_address' => 'alex.morgan@example.com', 'department_id' => 'DEP-0001', 'mode' => 'Hybrid', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
+        ['id' => '11111111-1111-4111-8111-111111111111', 'ref_number' => 'INT-0007', 'first_name' => 'Alex', 'last_name' => 'Morgan', 'email_address' => 'alex.morgan@example.com', 'department_id' => 'DEP-0001', 'mode' => 'Hybrid', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27', 'photo_url' => 'https://i.pravatar.cc/150?img=12'],
         ['id' => '22222222-2222-4222-8222-222222222222', 'ref_number' => 'INT-0008', 'first_name' => 'Jordan', 'last_name' => 'Lee', 'email_address' => 'jordan.lee@example.com', 'department_id' => 'DEP-0002', 'mode' => 'On-site', 'allowance' => 'RM50/day', 'internship_start_date' => '2026-08-03', 'internship_end_date' => '2026-11-27'],
     ];
     return array_combine(array_column($interns, 'id'), $interns);
