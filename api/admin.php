@@ -6,8 +6,12 @@ require_once __DIR__ . '/config.php';
 // GET /api/admin/attendance?date=YYYY-MM-DD -- every intern's attendance for
 // one day, admin-only. Defaults to today.
 // GET /api/admin/attendance?month=YYYY-MM[&status=Late|On time|Excused (MC)]
-//   [&intern=<uuid>] -- every matching record across the whole month instead
-// of one day, for the "show all late/on-time this month" status filter view.
+//   [&intern=<uuid>][&format=csv] -- every matching record across the whole
+// month instead of one day, for the "show all late/on-time this month"
+// status filter view. format=csv returns the same rows as a downloadable
+// CSV (opens directly in Excel) instead of JSON, honoring whatever
+// status/intern filter is also given -- so exporting mirrors whatever's
+// currently on screen.
 // Read-only either way; nothing here writes attendance on anyone's behalf.
 // ============================================================================
 
@@ -34,11 +38,33 @@ try {
         if (!$parsedMonth || $parsedMonth->format('Y-m') !== $month) {
             respond(['success' => false, 'message' => 'Invalid month.'], 422);
         }
-        respond([
-            'success' => true,
-            'month' => $month,
-            'records' => allAttendanceForAdminMonth($pdo, $parsedMonth->format('Y-m-01'), $parsedMonth->format('Y-m-t'), $internId, $status),
-        ]);
+        $records = allAttendanceForAdminMonth($pdo, $parsedMonth->format('Y-m-01'), $parsedMonth->format('Y-m-t'), $internId, $status);
+
+        if (trim((string) ($_GET['format'] ?? '')) === 'csv') {
+            header('Content-Type: text/csv; charset=utf-8');
+            header('Content-Disposition: attachment; filename="attendance-' . $month . '.csv"');
+            header('Cache-Control: no-store');
+            $out = fopen('php://output', 'w');
+            fputcsv($out, ['Date', 'Intern', 'Reference', 'Department', 'Clock In', 'Clock Out', 'Mode', 'Status']);
+            $directory = internDirectory();
+            foreach ($records as $record) {
+                $intern = $directory[$record['internId']] ?? null;
+                fputcsv($out, [
+                    $record['rawDate'],
+                    $record['internName'],
+                    $record['refNumber'],
+                    $intern ? departmentName($intern['department_id'] ?? null) : '',
+                    $record['clockIn'],
+                    $record['clockOut'],
+                    $record['mode'],
+                    $record['status'],
+                ]);
+            }
+            fclose($out);
+            exit;
+        }
+
+        respond(['success' => true, 'month' => $month, 'records' => $records]);
     }
 
     $date = trim((string) ($_GET['date'] ?? '')) ?: date('Y-m-d');
