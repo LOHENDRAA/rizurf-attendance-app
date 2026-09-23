@@ -18,33 +18,49 @@ use Minishlink\WebPush\Subscription;
 
 // ============================================================================
 // GET /api/cron-reminders -- meant to be hit on a schedule (Vercel Cron; see
-// vercel.json), never by a person. Two reminders, each sent at most once per
-// intern per day (reminders_sent):
+// vercel.json), never by a person. Four reminders, each sent at most once
+// per intern per day (reminders_sent), and each with a lower bound only, no
+// upper bound:
 //
-//   clock_in  - past REMINDER_CLOCK_IN_DEADLINE, nothing recorded yet today.
-//   clock_out - within REMINDER_LEAD_MINUTES of REMINDER_SHIFT_END, clocked
-//               in but never clocked out.
+//   clock_in           - past REMINDER_CLOCK_IN_DEADLINE, nothing recorded
+//                         yet today.
+//   clock_in_followup  - clock_in already sent today, still nothing
+//                         recorded.
+//   clock_out          - past REMINDER_SHIFT_END, clocked in but never
+//                         clocked out.
+//   clock_out_followup - clock_out already sent today, still not clocked
+//                         out.
 //
 // Runs entirely off push_subscriptions -- an intern who never turned
 // reminders on is never even considered.
 //
-// vercel.json fires this twice a day, not on an interval: the Hobby plan
-// caps a single cron schedule at once/day, so a naive "*/10 * * * *" (the
-// original attempt here) fails every deployment outright rather than just
-// running less often. Two separate once-daily crons, timed to land inside
-// each reminder's own window, cover both checks within that limit -- this
-// function still checks both conditions on every run regardless of which
-// cron triggered it, so which one fires when doesn't matter functionally.
+// vercel.json fires this four times a day, not on an interval: the Hobby
+// plan caps a single cron schedule at once/day, so a naive "*/10 * * * *"
+// (the original attempt here) fails every deployment outright rather than
+// just running less often. Four separate once-daily crons cover all four
+// checks -- this function still evaluates every condition on every run
+// regardless of which cron triggered it, so which one fires when doesn't
+// matter functionally, and none of the checks need an upper bound:
+// reminders_sent already caps each one to once per day, so there's nothing
+// to protect against by cutting a check off after some point.
+//
+// That lower-bound-only shape isn't just simpler, it's required: Vercel's
+// own Cron Jobs settings page states Hobby-plan crons run within "a
+// flexible time window of 1 hour" of their scheduled time, not on the
+// minute. An earlier version of the clock-out check had an upper bound (a
+// 17:45-18:05 window), which missed every single real firing -- confirmed
+// via reminders_sent never once recording a clock_out send despite
+// clock_in (already lower-bound-only) firing correctly every day. The same
+// imprecision means each follow-up's "5 minutes after" is best-effort, not
+// guaranteed -- on a bad day the gap could be much longer.
 //
 // Vercel Cron schedules are always UTC, never the app's APP_TIMEZONE. With
 // the .env.example defaults (Asia/Kuala_Lumpur, UTC+8):
 //   "0 1 * * *"   -> 09:00 MYT, matching REMINDER_CLOCK_IN_DEADLINE
-//   "0 10 * * *"  -> 18:00 MYT, matching REMINDER_SHIFT_END itself -- the
-//                    clock-out window's upper bound gets a few minutes of
-//                    grace past shift end (below) so a cron scheduled right
-//                    at the boundary isn't missed by a few seconds of
-//                    serverless execution delay.
-// Change REMINDER_CLOCK_IN_DEADLINE / REMINDER_SHIFT_END and these two
+//   "5 1 * * *"   -> 09:05 MYT, the clock-in follow-up
+//   "0 10 * * *"  -> 18:00 MYT, matching REMINDER_SHIFT_END
+//   "5 10 * * *"  -> 18:05 MYT, the clock-out follow-up
+// Change REMINDER_CLOCK_IN_DEADLINE / REMINDER_SHIFT_END and these four
 // schedules need updating by hand to match -- they aren't read from env.
 // ============================================================================
 
@@ -111,7 +127,7 @@ $webPush = new WebPush([
 
 $now = new DateTime();
 $today = $now->format('Y-m-d');
-$sent = ['clock_in' => 0, 'clock_out' => 0];
+$sent = ['clock_in' => 0, 'clock_in_followup' => 0, 'clock_out' => 0, 'clock_out_followup' => 0];
 
 $internIds = $pdo->query('SELECT DISTINCT intern_id FROM push_subscriptions')->fetchAll(PDO::FETCH_COLUMN);
 foreach ($internIds as $internId) {
@@ -119,24 +135,39 @@ foreach ($internIds as $internId) {
     $todayStatement->execute([$internId, $today]);
     $todayRecord = $todayStatement->fetch();
 
+    // Each reminder has an independent one-shot follow-up, gated on the
+    // first having already gone out and still being unresolved -- fired by
+    // its own cron entry 5 minutes after the first (vercel.json), not by
+    // waiting inside this request. "5 minutes" is best-effort, same as the
+    // first reminder's own timing: Vercel Hobby crons land within "a
+    // flexible time window of 1 hour" of their scheduled time, not on the
+    // minute, so some days the gap will be longer.
     $clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_CLOCK_IN_DEADLINE', '09:00'));
-    if ($now >= $clockInDeadline && !$todayRecord && !reminderAlreadySentToday($pdo, $internId, 'clock_in')) {
+    $clockInDue = $now >= $clockInDeadline && !$todayRecord;
+    if ($clockInDue && !reminderAlreadySentToday($pdo, $internId, 'clock_in')) {
         sendReminderPush($webPush, $pdo, $internId, "Don't forget to clock in", "You haven't clocked in yet today.", 'notify_clock_in');
         markReminderSent($pdo, $internId, 'clock_in');
         $sent['clock_in']++;
+    } elseif ($clockInDue && reminderAlreadySentToday($pdo, $internId, 'clock_in')
+        && !reminderAlreadySentToday($pdo, $internId, 'clock_in_followup')) {
+        sendReminderPush($webPush, $pdo, $internId, 'Still not clocked in', "Second reminder -- you still haven't clocked in today.", 'notify_clock_in');
+        markReminderSent($pdo, $internId, 'clock_in_followup');
+        $sent['clock_in_followup']++;
     }
 
+    // No upper bound, deliberately -- see the module comment above for why:
+    // a narrow window here silently missed every single real firing.
     $shiftEnd = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_SHIFT_END', '18:00'));
-    $reminderWindowStart = (clone $shiftEnd)->modify('-' . (int) env('REMINDER_LEAD_MINUTES', '15') . ' minutes');
-    // A few minutes of grace past shift end -- the cron is scheduled for
-    // exactly this moment, and a strict "<= shiftEnd" would miss the window
-    // entirely if the function takes even a few seconds to start running.
-    $reminderWindowEnd = (clone $shiftEnd)->modify('+5 minutes');
-    if ($now >= $reminderWindowStart && $now <= $reminderWindowEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out']
-        && !reminderAlreadySentToday($pdo, $internId, 'clock_out')) {
+    $clockOutDue = $now >= $shiftEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out'];
+    if ($clockOutDue && !reminderAlreadySentToday($pdo, $internId, 'clock_out')) {
         sendReminderPush($webPush, $pdo, $internId, 'Shift ending soon', 'Remember to clock out before you leave.', 'notify_clock_out');
         markReminderSent($pdo, $internId, 'clock_out');
         $sent['clock_out']++;
+    } elseif ($clockOutDue && reminderAlreadySentToday($pdo, $internId, 'clock_out')
+        && !reminderAlreadySentToday($pdo, $internId, 'clock_out_followup')) {
+        sendReminderPush($webPush, $pdo, $internId, 'Still clocked in', "Second reminder -- don't forget to clock out.", 'notify_clock_out');
+        markReminderSent($pdo, $internId, 'clock_out_followup');
+        $sent['clock_out_followup']++;
     }
 }
 

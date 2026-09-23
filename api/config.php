@@ -515,6 +515,42 @@ function allAttendanceForAdmin(PDO $pdo, string $date): array
 }
 
 /**
+ * Every matching record across a whole month (optionally scoped to one
+ * intern and/or one status), not just one day -- powers the admin
+ * calendar's "show all late/on-time this month" status filter, so clicking
+ * Late isn't limited to whichever single day happens to be selected.
+ * Newest first, unlike allAttendanceForAdmin()'s alphabetical order, since
+ * this is a log of a whole month rather than a single day's roster.
+ */
+function allAttendanceForAdminMonth(PDO $pdo, string $start, string $end, ?string $internId, ?string $status): array
+{
+    $sql = 'SELECT * FROM attendance_feed WHERE attendance_date BETWEEN ? AND ?';
+    $params = [$start, $end];
+    if ($internId !== null) {
+        $sql .= ' AND intern_id = ?';
+        $params[] = $internId;
+    }
+    if ($status !== null) {
+        $sql .= ' AND effective_status = ?';
+        $params[] = $status;
+    }
+    $sql .= ' ORDER BY attendance_date DESC';
+
+    $statement = $pdo->prepare($sql);
+    $statement->execute($params);
+    $directory = internDirectory();
+
+    return array_map(static function (array $row) use ($directory): array {
+        $record = formatRecord($row);
+        $intern = $directory[$row['intern_id']] ?? null;
+        $record['internId'] = $row['intern_id'];
+        $record['internName'] = $intern ? trim($intern['first_name'] . ' ' . $intern['last_name']) : 'Unknown intern';
+        $record['refNumber'] = $intern['ref_number'] ?? null;
+        return $record;
+    }, $statement->fetchAll());
+}
+
+/**
  * Per-day attendance and late counts for every day in [start, end] that has
  * at least one record -- one aggregated query for the whole visible month,
  * not one query per day, so the admin calendar's badges stay cheap however
@@ -522,7 +558,15 @@ function allAttendanceForAdmin(PDO $pdo, string $date): array
  */
 function attendanceSummaryForAdmin(PDO $pdo, string $start, string $end, ?string $internId = null): array
 {
-    $sql = "SELECT attendance_date, COUNT(*) AS total, SUM(effective_status = 'Late') AS late
+    // MAX(effective_status) is meaningless across multiple interns, but
+    // when $internId scopes this to one person there's at most one record
+    // per date (attendance_one_per_intern_per_day), so it's just that day's
+    // actual status -- lets the filtered calendar show a real on-time/late
+    // dot per day instead of only a count.
+    $sql = "SELECT attendance_date, COUNT(*) AS total,
+                   SUM(effective_status = 'Late') AS late,
+                   SUM(effective_status = 'On time') AS on_time,
+                   MAX(effective_status) AS status
             FROM attendance_feed
             WHERE attendance_date BETWEEN ? AND ?";
     $params = [$start, $end];
@@ -538,6 +582,8 @@ function attendanceSummaryForAdmin(PDO $pdo, string $start, string $end, ?string
         'date' => $row['attendance_date'],
         'total' => (int) $row['total'],
         'late' => (int) $row['late'],
+        'onTime' => (int) $row['on_time'],
+        'status' => $row['status'],
     ], $statement->fetchAll());
 }
 

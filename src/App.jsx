@@ -71,6 +71,45 @@ function statusDotClass(status) {
   return 'ontime'
 }
 
+// One admin-calendar day cell. Filtered to one intern, it shows that day's
+// actual status as a dot (like the intern's own calendar); otherwise it
+// shows a count, which switches to just the late/on-time count when a
+// status filter is active (dimming days that don't have any, so a month
+// full of late days jumps out at a glance).
+function AdminCalendarDay({ date, isSelected, isToday, dayData, filterIntern, statusFilter, onSelect }) {
+  if (!date) return <span className="admin-calendar-day empty"></span>
+
+  const matchesStatusFilter = !statusFilter || dayData?.status === statusFilter
+  const className = [
+    'admin-calendar-day',
+    isSelected && 'selected',
+    isToday && 'is-today',
+    filterIntern && statusFilter && dayData && !matchesStatusFilter && 'dimmed',
+  ].filter(Boolean).join(' ')
+
+  let badge = null
+  if (dayData) {
+    if (filterIntern) {
+      badge = <span className={`history-dot ${statusDotClass(dayData.status)}`} title={dayData.status}></span>
+    } else if (statusFilter === 'Late' && dayData.late > 0) {
+      badge = <span className="admin-calendar-count late-count">{dayData.late}</span>
+    } else if (statusFilter === 'On time' && dayData.onTime > 0) {
+      badge = <span className="admin-calendar-count">{dayData.onTime}</span>
+    } else if (!statusFilter) {
+      badge = <span className="admin-calendar-count">{dayData.total}</span>
+    }
+  }
+  const showLateDot = !filterIntern && !statusFilter && dayData?.late > 0
+
+  return (
+    <button className={className} onClick={() => onSelect(date)}>
+      <span className="admin-calendar-daynum">{Number(date.slice(8, 10))}</span>
+      {badge}
+      {showLateDot && <span className="admin-calendar-late-dot" title={`${dayData.late} late`}></span>}
+    </button>
+  )
+}
+
 function SkeletonLine({ width, height = 14, style }) {
   return <span className="skeleton skeleton-line" style={{ width, height, ...style }}></span>
 }
@@ -115,9 +154,12 @@ function App() {
   const [adminDate, setAdminDate] = useState(todayIsoDate)
   const [adminRecords, setAdminRecords] = useState([])
   const [adminLoading, setAdminLoading] = useState(false)
+  const [adminMonthRecords, setAdminMonthRecords] = useState([])
+  const [adminMonthLoading, setAdminMonthLoading] = useState(false)
   const [adminCalendarMonth, setAdminCalendarMonth] = useState(() => todayIsoDate().slice(0, 7))
   const [adminCalendarDays, setAdminCalendarDays] = useState([])
   const [adminFilterIntern, setAdminFilterIntern] = useState(null)
+  const [adminStatusFilter, setAdminStatusFilter] = useState(null)
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [avatarFailed, setAvatarFailed] = useState(false)
   const [theme, setTheme] = useState(() => {
@@ -480,6 +522,22 @@ function App() {
     setAdminCalendarMonth(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}`)
   }
 
+  // Every matching record for the whole month, not just the selected day --
+  // what the Late/On time toggle actually shows once active.
+  const loadAdminMonthRecords = (month, status, internId) => {
+    setAdminMonthLoading(true)
+    const query = new URLSearchParams({ month, status })
+    if (internId) query.set('intern', internId)
+    fetch(`./api/admin/attendance.php?${query}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.success) throw new Error(data.message)
+        setAdminMonthRecords(data.records)
+      })
+      .catch((error) => showNotice('error', error.message || 'Could not load this month.'))
+      .finally(() => setAdminMonthLoading(false))
+  }
+
   // Clicking the already-filtered intern's name again clears the filter.
   const toggleAdminFilterIntern = (record) => {
     setAdminFilterIntern((previous) => (previous?.id === record.internId ? null : { id: record.internId, name: record.internName }))
@@ -511,6 +569,11 @@ function App() {
     if (isAdmin && activeTab === 'admin') loadAdminCalendar(adminCalendarMonth, adminFilterIntern?.id)
   }, [isAdmin, activeTab, adminCalendarMonth, adminFilterIntern])
   useEffect(() => {
+    if (isAdmin && activeTab === 'admin' && adminStatusFilter) {
+      loadAdminMonthRecords(adminCalendarMonth, adminStatusFilter, adminFilterIntern?.id)
+    }
+  }, [isAdmin, activeTab, adminCalendarMonth, adminStatusFilter, adminFilterIntern])
+  useEffect(() => {
     if (activeTab === 'history') loadHistoryMonth(historyMonth)
   }, [activeTab, historyMonth])
   /* oxlint-enable react-hooks/exhaustive-deps, react(set-state-in-effect) */
@@ -520,7 +583,12 @@ function App() {
   const historyWeeks = buildMonthGrid(historyMonth)
   const historyByDate = Object.fromEntries(historyMonthRecords.map((record) => [record.rawDate, record]))
   const todayDate = todayIsoDate()
-  const visibleAdminRecords = adminFilterIntern ? adminRecords.filter((record) => record.internId === adminFilterIntern.id) : adminRecords
+  // Status filter active -> every matching record for the whole month
+  // (already filtered server-side). Otherwise -> just the selected day,
+  // filtered client-side to the selected intern if any.
+  const visibleAdminRecords = adminStatusFilter
+    ? adminMonthRecords
+    : adminRecords.filter((record) => !adminFilterIntern || record.internId === adminFilterIntern.id)
 
   // The QR image is rendered client-side from whatever the current code
   // actually is -- never a separate fetch, so it can never drift from what
@@ -587,7 +655,7 @@ function App() {
 
         {activeTab === 'history' && <section className="tab-panel logs-panel"><div className="tab-heading"><p className="eyebrow">ATTENDANCE LOGS</p><h1>My attendance history</h1><p>Clock-ins, clock-outs, late arrivals, and grace-period records.</p></div><article className="activity-card"><div className="admin-calendar"><div className="admin-calendar-header"><button className="icon-button" aria-label="Previous month" onClick={() => shiftHistoryMonth(-1)}><ChevronLeft size={18} /></button><strong>{formatMonthLabel(historyMonth)}</strong><button className="icon-button" aria-label="Next month" onClick={() => shiftHistoryMonth(1)}><ChevronRight size={18} /></button></div><div className="admin-calendar-weekdays"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div className="admin-calendar-grid">{historyWeeks.map((week, weekIndex) => week.map((date, dayIndex) => date ? <div key={date} className={`admin-calendar-day${date === todayDate ? ' is-today' : ''}`}><span className="admin-calendar-daynum">{Number(date.slice(8, 10))}</span>{historyByDate[date] && <span className={`history-dot ${statusDotClass(historyByDate[date].status)}`} title={historyByDate[date].status}></span>}</div> : <span key={`${weekIndex}-${dayIndex}`} className="admin-calendar-day empty"></span>))}</div></div><div className="history-list">{historyMonthLoading ? <><HistoryRowSkeleton /><HistoryRowSkeleton /><HistoryRowSkeleton /></> : historyMonthRecords.length === 0 ? <p className="drawer-note">No attendance recorded this month.</p> : historyMonthRecords.slice().reverse().map((entry) => <div className="history-row" key={`log-${entry.id}`}><div className="history-date"><strong>{entry.date.split(',')[0]}</strong><span>{entry.date.split(',').slice(1).join(',')}</span></div><div className="history-times"><strong>{entry.clockIn || '—'}</strong><span>{entry.clockOut ? `to ${entry.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{entry.mode}</span><span className={`status-tag ${entry.status === 'On time' ? 'green' : entry.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{entry.status}</span></div>)}</div></article></section>}
 
-        {activeTab === 'admin' && isAdmin && <section className="tab-panel admin-panel"><div className="tab-heading"><p className="eyebrow">ADMIN</p><h1>Attendance overview</h1><p>Every intern's attendance, and the office QR code.</p></div><article className="activity-card admin-qr-card"><div className="section-heading"><div><p className="eyebrow">OFFICE QR</p><h2>Current code</h2></div><div className="admin-qr-actions"><button className="secondary-action" onClick={downloadQr}><Download size={16} /> Save QR</button><button className="secondary-action" onClick={regenerateQr}><QrCode size={16} /> Regenerate</button></div></div>{qrDataUrl && <img src={qrDataUrl} alt="Office QR code" className="admin-qr-image" />}<p className="drawer-note">Regenerating invalidates the old code immediately -- update the printed or displayed copy at the office right away.</p></article><article className="activity-card"><div className="section-heading"><div><p className="eyebrow">ALL ATTENDANCE</p><h2>{adminDate}</h2></div>{adminFilterIntern && <button className="filter-chip" onClick={() => setAdminFilterIntern(null)}>{adminFilterIntern.name}<X size={13} /></button>}</div><div className="admin-calendar"><div className="admin-calendar-header"><button className="icon-button" aria-label="Previous month" onClick={() => shiftAdminMonth(-1)}><ChevronLeft size={18} /></button><strong>{formatMonthLabel(adminCalendarMonth)}</strong><button className="icon-button" aria-label="Next month" onClick={() => shiftAdminMonth(1)}><ChevronRight size={18} /></button></div><div className="admin-calendar-weekdays"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div className="admin-calendar-grid">{adminCalendarWeeks.map((week, weekIndex) => week.map((date, dayIndex) => date ? <button key={date} className={`admin-calendar-day${date === adminDate ? ' selected' : ''}${date === todayDate ? ' is-today' : ''}`} onClick={() => setAdminDate(date)}><span className="admin-calendar-daynum">{Number(date.slice(8, 10))}</span>{adminCalendarByDate[date] && <span className="admin-calendar-count">{adminCalendarByDate[date].total}</span>}{adminCalendarByDate[date]?.late > 0 && <span className="admin-calendar-late-dot" title={`${adminCalendarByDate[date].late} late`}></span>}</button> : <span key={`${weekIndex}-${dayIndex}`} className="admin-calendar-day empty"></span>))}</div></div><div className="history-list">{adminLoading ? <p className="drawer-note">Loading...</p> : visibleAdminRecords.length === 0 ? <p className="drawer-note">{adminFilterIntern ? `No attendance for ${adminFilterIntern.name} on this date.` : 'No attendance recorded for this date.'}</p> : visibleAdminRecords.map((record) => <div className="history-row" key={record.id}><div className="history-date"><button className="intern-name-button" onClick={() => toggleAdminFilterIntern(record)}>{record.internName}</button><span>{record.refNumber}</span></div><div className="history-times"><strong>{record.clockIn || '—'}</strong><span>{record.clockOut ? `to ${record.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{record.mode}</span><span className={`status-tag ${record.status === 'On time' ? 'green' : record.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{record.status}</span></div>)}</div></article></section>}
+        {activeTab === 'admin' && isAdmin && <section className="tab-panel admin-panel"><div className="tab-heading"><p className="eyebrow">ADMIN</p><h1>Attendance overview</h1><p>Every intern's attendance, and the office QR code.</p></div><article className="activity-card admin-qr-card"><div className="section-heading"><div><p className="eyebrow">OFFICE QR</p><h2>Current code</h2></div><div className="admin-qr-actions"><button className="secondary-action" onClick={downloadQr}><Download size={16} /> Save QR</button><button className="secondary-action" onClick={regenerateQr}><QrCode size={16} /> Regenerate</button></div></div>{qrDataUrl && <img src={qrDataUrl} alt="Office QR code" className="admin-qr-image" />}<p className="drawer-note">Regenerating invalidates the old code immediately -- update the printed or displayed copy at the office right away.</p></article><article className="activity-card"><div className="section-heading"><div><p className="eyebrow">ALL ATTENDANCE</p><h2>{adminStatusFilter ? formatMonthLabel(adminCalendarMonth) : adminDate}</h2></div><div className="admin-filter-bar"><button className={adminStatusFilter === 'Late' ? 'status-filter-button active-late' : 'status-filter-button'} onClick={() => setAdminStatusFilter((previous) => (previous === 'Late' ? null : 'Late'))}>Late</button><button className={adminStatusFilter === 'On time' ? 'status-filter-button active-ontime' : 'status-filter-button'} onClick={() => setAdminStatusFilter((previous) => (previous === 'On time' ? null : 'On time'))}>On time</button>{adminFilterIntern && <button className="filter-chip" onClick={() => setAdminFilterIntern(null)}>{adminFilterIntern.name}<X size={13} /></button>}</div></div><div className="admin-calendar"><div className="admin-calendar-header"><button className="icon-button" aria-label="Previous month" onClick={() => shiftAdminMonth(-1)}><ChevronLeft size={18} /></button><strong>{formatMonthLabel(adminCalendarMonth)}</strong><button className="icon-button" aria-label="Next month" onClick={() => shiftAdminMonth(1)}><ChevronRight size={18} /></button></div><div className="admin-calendar-weekdays"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div><div className="admin-calendar-grid">{adminCalendarWeeks.map((week, weekIndex) => week.map((date, dayIndex) => <AdminCalendarDay key={date || `${weekIndex}-${dayIndex}`} date={date} isSelected={date === adminDate} isToday={date === todayDate} dayData={date ? adminCalendarByDate[date] : null} filterIntern={adminFilterIntern} statusFilter={adminStatusFilter} onSelect={setAdminDate} />))}</div></div><div className="history-list">{(adminStatusFilter ? adminMonthLoading : adminLoading) ? <p className="drawer-note">Loading...</p> : visibleAdminRecords.length === 0 ? <p className="drawer-note">{adminFilterIntern || adminStatusFilter ? `No${adminStatusFilter ? ` ${adminStatusFilter.toLowerCase()}` : ''} attendance${adminFilterIntern ? ` for ${adminFilterIntern.name}` : ''} ${adminStatusFilter ? 'this month' : 'on this date'}.` : 'No attendance recorded for this date.'}</p> : visibleAdminRecords.map((record) => <div className="history-row" key={record.id}><div className="history-date"><button className="intern-name-button" onClick={() => toggleAdminFilterIntern(record)}>{record.internName}</button><span>{adminStatusFilter ? `${record.date} · ${record.refNumber}` : record.refNumber}</span></div><div className="history-times"><strong>{record.clockIn || '—'}</strong><span>{record.clockOut ? `to ${record.clockOut}` : 'Still working'}</span></div><span className="mode-tag">{record.mode}</span><span className={`status-tag ${record.status === 'On time' ? 'green' : record.status === 'Excused (MC)' ? 'excused' : 'orange'}`}>{record.status}</span></div>)}</div></article></section>}
       </main>
       <footer><span>Rizurf People Ops</span><span>Attendance service <b></b> All systems operational</span></footer>
 
