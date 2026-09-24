@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Bell, Briefcase, Check, ChevronLeft, ChevronRight, Clock3, Download, FileScan,
+  Bell, Briefcase, Check, ChevronLeft, ChevronRight, Clock3, Download,
   Home, LogOut, MapPin, Moon, QrCode, ScanLine, Smartphone,
   ShieldCheck, Sun, X,
 } from 'lucide-react'
@@ -426,27 +426,6 @@ function App() {
     }
   }
 
-  const scanQrImage = async (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    const scanner = new Html5Qrcode('qr-reader')
-    scannerRef.current = scanner
-    setScanStatus('Reading QR image...')
-    try {
-      const decodedText = await scanner.scanFile(file, true)
-      await stopScanner()
-      if (decodedText.trim() !== currentQr) {
-        setScanStatus('')
-        setScannerError(`QR read as “${decodedText.trim()}”, but the expected value is “${currentQr}”.`)
-        return
-      }
-      verifyOfficeLocation()
-    } catch {
-      setScanStatus('')
-      setScannerError('Could not read a QR code from that image.')
-    }
-    event.target.value = ''
-  }
 
   const openAttendance = () => {
     setScannerError('')
@@ -672,7 +651,7 @@ function App() {
 
       <nav className="bottom-nav" aria-label="Primary navigation"><button className={activeTab === 'home' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('home')}><Home size={21} /><span>Home</span></button><button className="nav-tab scan-tab" onClick={() => selectTab('scan')}><span className="scan-button"><ScanLine size={24} /></span><span>Scan</span></button><button className={activeTab === 'history' ? 'nav-tab active' : 'nav-tab'} onClick={() => selectTab('history')}><Clock3 size={21} /><span>History</span></button></nav>
 
-      {modal && <div className="modal-backdrop" role="presentation" onClick={(event) => event.target === event.currentTarget && setModal(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="attendance-modal-title"><button className="modal-close" aria-label="Close" onClick={() => setModal(null)}><X size={18} /></button>{modal === 'mode' ? <><div className="modal-icon"><Clock3 size={22} /></div><p className="eyebrow">CLOCK {action.toUpperCase()}</p><h2 id="attendance-modal-title">How are you working today?</h2><p className="modal-subtitle">We will verify your attendance based on where you are.</p><div className="mode-options"><button className="mode-option" onClick={() => chooseMode('Office')}><span className="mode-icon office"><QrCode size={21} /></span><span><strong>At the office</strong><small>Scan QR and verify within 100m</small></span><ChevronRight size={17} /></button><button className="mode-option" onClick={() => chooseMode('Hybrid')}><span className="mode-icon hybrid"><MapPin size={21} /></span><span><strong>Hybrid / away</strong><small>Clock {action} without office QR</small></span><ChevronRight size={17} /></button></div></> : <><div className="modal-icon"><QrCode size={22} /></div><p className="eyebrow">OFFICE QR VERIFICATION</p><h2 id="attendance-modal-title">Scan the office QR</h2><p className="modal-subtitle">Scan the QR code provided by Rizurf, then stay within 100m while location is checked.</p><div id="qr-reader" className="qr-reader"></div>{scanStatus && <p className="scanner-status">{scanStatus}</p>}{scannerError && <p className="scanner-error">{scannerError}</p>}<label className="upload-qr"><FileScan size={16} /> Use a QR image<input type="file" accept="image/*" onChange={scanQrImage} /></label><button className="text-button cancel-scan" onClick={() => setModal(null)}>Cancel scan</button></>}</div></div>}
+      {modal && <div className="modal-backdrop" role="presentation" onClick={(event) => event.target === event.currentTarget && setModal(null)}><div className="modal" role="dialog" aria-modal="true" aria-labelledby="attendance-modal-title"><button className="modal-close" aria-label="Close" onClick={() => setModal(null)}><X size={18} /></button>{modal === 'mode' ? <><div className="modal-icon"><Clock3 size={22} /></div><p className="eyebrow">CLOCK {action.toUpperCase()}</p><h2 id="attendance-modal-title">How are you working today?</h2><p className="modal-subtitle">We will verify your attendance based on where you are.</p><div className="mode-options"><button className="mode-option" onClick={() => chooseMode('Office')}><span className="mode-icon office"><QrCode size={21} /></span><span><strong>At the office</strong><small>Scan QR and verify within 100m</small></span><ChevronRight size={17} /></button><button className="mode-option" onClick={() => chooseMode('Hybrid')}><span className="mode-icon hybrid"><MapPin size={21} /></span><span><strong>Hybrid / away</strong><small>Clock {action} without office QR</small></span><ChevronRight size={17} /></button></div></> : <><div className="modal-icon"><QrCode size={22} /></div><p className="eyebrow">OFFICE QR VERIFICATION</p><h2 id="attendance-modal-title">Scan the office QR</h2><p className="modal-subtitle">Scan the QR code provided by Rizurf, then stay within 100m while location is checked.</p><div id="qr-reader" className="qr-reader"></div>{scanStatus && <p className="scanner-status">{scanStatus}</p>}{scannerError && <p className="scanner-error">{scannerError}</p>}<button className="text-button cancel-scan" onClick={() => setModal(null)}>Cancel scan</button></>}</div></div>}
       {profileOpen && <div className="profile-backdrop" onClick={(event) => event.target === event.currentTarget && setProfileOpen(false)}><aside className="profile-drawer"><button className="drawer-close" aria-label="Close profile" onClick={() => setProfileOpen(false)}><X size={19} /></button>{photoUrl ? <img src={photoUrl} alt="" className="drawer-avatar" onError={() => setAvatarFailed(true)} /> : <div className="drawer-avatar">{initials}</div>}<p className="eyebrow">INTERN PROFILE</p><h2>{displayName}</h2><div className="credential-list"><div><span>Department</span><strong>{intern?.department_name || '—'}</strong></div><div><span>Rizurf account</span><strong>{me?.email || '—'}</strong></div></div><div className="drawer-setting"><span><Bell size={18} /> Clock in/out reminder</span><button className={notificationsEnabled ? 'toggle is-on' : 'toggle'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><i></i></button></div><div className="drawer-setting"><span>{theme === 'dark' ? <Moon size={18} /> : <Sun size={18} />} Dark mode</span><button className={theme === 'dark' ? 'toggle is-on' : 'toggle'} aria-pressed={theme === 'dark'} onClick={toggleTheme}><i></i></button></div>{isAdmin && <button className="drawer-setting drawer-action" onClick={() => { setProfileOpen(false); selectTab('admin') }}><ShieldCheck size={18} /> Admin<ChevronRight size={16} style={{ marginLeft: 'auto' }} /></button>}<p className="eyebrow drawer-section-label"><ShieldCheck size={14} /> LINKED DEVICES</p>{devices.length > 0 ? <div className="device-list">{devices.map((d) => <button key={d.id} className="device-row" onClick={() => unlinkDevice(d.id)}><span className="device-icon"><Smartphone size={17} /></span><span className="device-info"><strong>{d.label}{d.isCurrent && <span className="device-current-tag"> · This device</span>}</strong><small>Last active {d.lastUsedAt}</small></span><X size={15} /></button>)}</div> : <p className="drawer-note">No devices linked yet. The first time you clock in, this device links to you -- after that, no one else can clock in from it.</p>}<button className="drawer-setting drawer-action logout-button" onClick={signOut}><LogOut size={18} /> Sign out</button><p className="drawer-note">Ends your session in this app and takes you to the Rizurf gateway. If you're still signed in there, opening this app again may sign you straight back in.</p></aside></div>}
     </div>
   )
