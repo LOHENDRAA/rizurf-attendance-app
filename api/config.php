@@ -925,7 +925,10 @@ function releaseDeviceLinkById(PDO $pdo, string $internId, string $deviceId): bo
 // Tiny JSON HTTP client (used for the gateway + Intern Database).
 // Returns [status, decoded body|raw].
 // ----------------------------------------------------------------------------
-function httpJson(string $method, string $url, array $headers = [], ?array $jsonBody = null, int $timeoutSeconds = 20): array
+// 5s default (MICROAPP_PERFORMANCE.md SS-9): most callers here (session
+// introspect, JWKS, intern lookup) run on a signed-in request's hot path, so
+// a hung gateway must fail fast, not hold the page open for 20s.
+function httpJson(string $method, string $url, array $headers = [], ?array $jsonBody = null, int $timeoutSeconds = 5): array
 {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
