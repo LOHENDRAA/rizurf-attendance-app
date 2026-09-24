@@ -388,6 +388,112 @@ function departmentName(?string $departmentId): ?string
 }
 
 // ----------------------------------------------------------------------------
+// Calendar DB (calendar-db) - the shared events/timeline service every
+// microapp reads company holidays from. Read-only from here: this app only
+// ever lists the public 'company-holidays' calendar, never writes to it.
+// Best-effort, same tradeoff as departmentName() above -- the calendar
+// service being down must never break a day's attendance, it just means
+// that day isn't flagged as a holiday until the next successful refresh.
+// ----------------------------------------------------------------------------
+
+/** A fixed local sample, mirroring mockDepartmentDirectory() -- same
+ *  dev-only gate. Dated relative to "now" so local testing this month
+ *  actually has something to show. */
+function mockCompanyHolidays(): array
+{
+    return [date('Y-m-d', strtotime('+10 days')) => 'Sample Public Holiday'];
+}
+
+/** Reuses this app's own gateway client (INTERN_DB_CLIENT_ID/SECRET), just
+ *  asking for a token scoped to a different audience -- the same pattern
+ *  departmentApiToken() uses for department-api. */
+function calendarDbToken(): string
+{
+    static $token = null;
+    static $expiresAt = 0;
+    if ($token !== null && time() < $expiresAt - 30) {
+        return $token;
+    }
+    $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
+    $clientId = envOrFail('INTERN_DB_CLIENT_ID');
+    $clientSecret = envOrFail('INTERN_DB_CLIENT_SECRET');
+    $audience = env('CALENDAR_DB_AUDIENCE', 'calendar-db');
+
+    [$status, $body] = httpJson('POST', "$gateway/oauth/token", [
+        'Authorization: Basic ' . base64_encode("$clientId:$clientSecret"),
+        'Content-Type: application/json',
+    ], ['grant_type' => 'client_credentials', 'audience' => $audience], 4);
+
+    if ($status !== 200 || !isset($body['access_token'])) {
+        throw new RuntimeException("gateway /oauth/token for calendar-db returned $status");
+    }
+    $token = $body['access_token'];
+    $expiresAt = time() + (int) ($body['expires_in'] ?? 3600);
+    return $token;
+}
+
+/**
+ * date (Y-m-d) -> holiday title, for every day in [$start, $end] on Calendar
+ * DB's public 'company-holidays' calendar. Empty on any failure -- never
+ * thrown.
+ *
+ * Cached to a temp file per requested range: holidays for a given month
+ * essentially never change once published, so this can be held much longer
+ * than departmentDirectory()'s 10 minutes without going stale in practice.
+ */
+function companyHolidays(string $start, string $end): array
+{
+    if (filter_var(env('DEV_ALLOW_NO_AUTH', ''), FILTER_VALIDATE_BOOL)
+        && filter_var(env('DEV_MOCK_INTERNS', ''), FILTER_VALIDATE_BOOL)) {
+        return array_filter(
+            mockCompanyHolidays(),
+            static fn (string $date): bool => $date >= $start && $date <= $end,
+            ARRAY_FILTER_USE_KEY
+        );
+    }
+
+    $cacheFile = sys_get_temp_dir() . '/attendance_holidays_' . md5("$start:$end") . '.json';
+    if (is_file($cacheFile)) {
+        $cached = json_decode((string) file_get_contents($cacheFile), true);
+        if (is_array($cached) && ($cached['at'] ?? 0) > time() - (int) ($cached['ttl'] ?? 0)) {
+            return $cached['data'];
+        }
+    }
+
+    $byDate = [];
+    $ttl = 300; // unreachable -- don't retry on every request for 5 minutes
+    try {
+        $base = rtrim(env('CALENDAR_DB_URL', 'https://calendar-db.vercel.app'), '/');
+        $query = http_build_query([
+            'calendar_id' => 'company-holidays',
+            'from' => "{$start}T00:00:00Z",
+            'to' => "{$end}T23:59:59Z",
+        ]);
+        [$status, $body] = httpJson('GET', "$base/events?$query", [
+            'Authorization: Bearer ' . calendarDbToken(),
+            'Accept: application/json',
+        ], null, 4);
+        $list = is_array($body) ? (array_is_list($body) ? $body : ($body['events'] ?? $body['data'] ?? null)) : null;
+        if ($status === 200 && is_array($list)) {
+            foreach ($list as $event) {
+                if (($event['status'] ?? 'confirmed') === 'cancelled') {
+                    continue;
+                }
+                $startAt = (string) ($event['startAt'] ?? $event['start_at'] ?? '');
+                if ($startAt !== '') {
+                    $byDate[substr($startAt, 0, 10)] = (string) ($event['title'] ?? 'Public holiday');
+                }
+            }
+            $ttl = 21600; // working: re-check every 6 hours, not every request
+        }
+    } catch (Throwable $e) {
+        error_log('[attendance-api] company holidays unavailable: ' . $e->getMessage());
+    }
+    @file_put_contents($cacheFile, json_encode(['data' => $byDate, 'at' => time(), 'ttl' => $ttl]));
+    return $byDate;
+}
+
+// ----------------------------------------------------------------------------
 // Who is this request for?
 //
 // THE SEAM. Resolution depends on how the caller authenticated ($GLOBALS['auth']

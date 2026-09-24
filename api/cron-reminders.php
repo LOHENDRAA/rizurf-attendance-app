@@ -129,6 +129,13 @@ $now = new DateTime();
 $today = $now->format('Y-m-d');
 $sent = ['clock_in' => 0, 'clock_in_followup' => 0, 'clock_out' => 0, 'clock_out_followup' => 0];
 
+// Only the "you haven't clocked in yet" nags skip on a company holiday --
+// someone isn't expected to clock in that day at all. Clock-out reminders
+// stay unconditional: they only ever fire for someone who already has a
+// clock_in today, i.e. worked anyway, and still deserves the nudge to
+// clock out.
+$todayIsHoliday = array_key_exists($today, companyHolidays($today, $today));
+
 $internIds = $pdo->query('SELECT DISTINCT intern_id FROM push_subscriptions')->fetchAll(PDO::FETCH_COLUMN);
 foreach ($internIds as $internId) {
     $todayStatement = $pdo->prepare('SELECT * FROM attendance_records WHERE intern_id = ? AND attendance_date = ? LIMIT 1');
@@ -143,7 +150,7 @@ foreach ($internIds as $internId) {
     // flexible time window of 1 hour" of their scheduled time, not on the
     // minute, so some days the gap will be longer.
     $clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_CLOCK_IN_DEADLINE', '09:00'));
-    $clockInDue = $now >= $clockInDeadline && !$todayRecord;
+    $clockInDue = $now >= $clockInDeadline && !$todayRecord && !$todayIsHoliday;
     if ($clockInDue && !reminderAlreadySentToday($pdo, $internId, 'clock_in')) {
         sendReminderPush($webPush, $pdo, $internId, "Don't forget to clock in", "You haven't clocked in yet today.", 'notify_clock_in');
         markReminderSent($pdo, $internId, 'clock_in');

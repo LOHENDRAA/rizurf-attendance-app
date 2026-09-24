@@ -32,7 +32,12 @@ try {
     $start = $parsed->format('Y-m-01');
     $end = $parsed->format('Y-m-t');
 
-    respond(['success' => true, 'month' => $month, 'days' => attendanceSummaryForAdmin($pdo, $start, $end, $internId)]);
+    respond([
+        'success' => true,
+        'month' => $month,
+        'days' => attendanceSummaryForAdmin($pdo, $start, $end, $internId),
+        'holidays' => companyHolidays($start, $end),
+    ]);
 } catch (ConfigException $error) {
     throw $error;
 } catch (Throwable $error) {

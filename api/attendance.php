@@ -24,11 +24,14 @@ try {
             if (!$parsed || $parsed->format('Y-m') !== $month) {
                 respond(['success' => false, 'message' => 'Invalid month.'], 422);
             }
+            $monthStart = $parsed->format('Y-m-01');
+            $monthEnd = $parsed->format('Y-m-t');
             respond([
                 'success' => true,
                 'linked' => true,
                 'month' => $month,
-                'records' => attendanceForInternMonth($pdo, $internId, $parsed->format('Y-m-01'), $parsed->format('Y-m-t')),
+                'records' => attendanceForInternMonth($pdo, $internId, $monthStart, $monthEnd),
+                'holidays' => companyHolidays($monthStart, $monthEnd),
             ]);
         }
 
