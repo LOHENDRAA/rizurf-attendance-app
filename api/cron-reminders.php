@@ -123,6 +123,14 @@ $webPush = new WebPush([
         'publicKey' => envOrFail('VAPID_PUBLIC_KEY'),
         'privateKey' => envOrFail('VAPID_PRIVATE_KEY'),
     ],
+    // Every reminder this cron sends is time-sensitive by definition, so ask
+    // for the highest delivery priority every time. Android routes web push
+    // through FCM, which gives 'high' urgency messages an exception to wake
+    // a backgrounded/Doze-restricted app to actually show the notification --
+    // this is the one lever a server has over a phone's own battery-saver
+    // settings; it can't override an OEM that outright force-stops the app,
+    // only give delivery its best shot within what the OS allows.
+    'urgency' => 'high',
 ]);
 
 $now = new DateTime();
