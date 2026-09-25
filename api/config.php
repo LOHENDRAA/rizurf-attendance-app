@@ -494,6 +494,85 @@ function companyHolidays(string $start, string $end): array
 }
 
 // ----------------------------------------------------------------------------
+// Due state + gateway icon badges (MICROAPP_BADGES.md)
+// ----------------------------------------------------------------------------
+
+/**
+ * Whether an intern owes a clock-in or clock-out right now, given today's
+ * raw attendance_records row (or null). The one definition both the push
+ * reminders and the gateway badge use, so they can never disagree.
+ *
+ * Lower bounds only, no upper bound -- see cron-reminders.php for why. A
+ * company holiday skips the clock-in side only: someone who clocked in
+ * anyway still owes a clock-out.
+ */
+function attendanceDueState(?array $todayRecord, DateTime $now, bool $todayIsHoliday): array
+{
+    $today = $now->format('Y-m-d');
+    $clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_CLOCK_IN_DEADLINE', '09:00'));
+    $shiftEnd = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_SHIFT_END', '18:00'));
+    return [
+        'clockIn' => $now >= $clockInDeadline && !$todayRecord && !$todayIsHoliday,
+        'clockOut' => $now >= $shiftEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out'],
+    ];
+}
+
+/**
+ * Publish icon-badge totals to the gateway: [['sub' => ..., 'count' => n]].
+ * Never throws -- a badge is a nicety and must never break the clock-in/out
+ * that changed it. Reuses this app's own API client, which a gateway admin
+ * must have granted `gateway:badges` for attendance-api (else a logged 403).
+ */
+function publishBadges(array $badges): void
+{
+    if (!$badges) {
+        return;
+    }
+    if (filter_var(env('DEV_ALLOW_NO_AUTH', ''), FILTER_VALIDATE_BOOL)
+        && filter_var(env('DEV_MOCK_INTERNS', ''), FILTER_VALIDATE_BOOL)) {
+        error_log('[attendance-api] badges (dev, not sent): ' . json_encode($badges));
+        return;
+    }
+    try {
+        $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
+        $auth = 'Authorization: Basic ' . base64_encode(envOrFail('INTERN_DB_CLIENT_ID') . ':' . envOrFail('INTERN_DB_CLIENT_SECRET'));
+        foreach (array_chunk($badges, 500) as $chunk) {
+            [$status, $body] = httpJson('POST', "$gateway/api/badges", [$auth, 'Content-Type: application/json'], [
+                'service' => env('SERVICE_ID', 'attendance-api'),
+                'badges' => $chunk,
+            ], 4);
+            if ($status !== 200) {
+                error_log("[attendance-api] badges: gateway returned $status " . (is_string($body) ? $body : json_encode($body)));
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('[attendance-api] badges: could not reach the gateway: ' . $e->getMessage());
+    }
+}
+
+/** Recompute and publish one intern's badge -- called right after they clock
+ *  in/out, so it clears immediately instead of waiting for the next cron. */
+function publishInternBadge(PDO $pdo, string $internId): void
+{
+    try {
+        $identity = $pdo->prepare('SELECT gateway_sub FROM app_identities WHERE intern_id = ?');
+        $identity->execute([$internId]);
+        $sub = $identity->fetchColumn();
+        if ($sub === false) {
+            return;
+        }
+        $now = new DateTime();
+        $today = $now->format('Y-m-d');
+        $record = $pdo->prepare('SELECT * FROM attendance_records WHERE intern_id = ? AND attendance_date = ?');
+        $record->execute([$internId, $today]);
+        $due = attendanceDueState($record->fetch() ?: null, $now, array_key_exists($today, companyHolidays($today, $today)));
+        publishBadges([['sub' => $sub, 'count' => ($due['clockIn'] || $due['clockOut']) ? 1 : 0]]);
+    } catch (Throwable $e) {
+        error_log('[attendance-api] badge for one intern: ' . $e->getMessage());
+    }
+}
+
+// ----------------------------------------------------------------------------
 // Who is this request for?
 //
 // THE SEAM. Resolution depends on how the caller authenticated ($GLOBALS['auth']

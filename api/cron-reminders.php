@@ -144,12 +144,15 @@ $sent = ['clock_in' => 0, 'clock_in_followup' => 0, 'clock_out' => 0, 'clock_out
 // clock out.
 $todayIsHoliday = array_key_exists($today, companyHolidays($today, $today));
 
+$todayRecords = [];
+$todayStatement = $pdo->prepare('SELECT * FROM attendance_records WHERE attendance_date = ?');
+$todayStatement->execute([$today]);
+foreach ($todayStatement->fetchAll() as $row) {
+    $todayRecords[$row['intern_id']] = $row;
+}
+
 $internIds = $pdo->query('SELECT DISTINCT intern_id FROM push_subscriptions')->fetchAll(PDO::FETCH_COLUMN);
 foreach ($internIds as $internId) {
-    $todayStatement = $pdo->prepare('SELECT * FROM attendance_records WHERE intern_id = ? AND attendance_date = ? LIMIT 1');
-    $todayStatement->execute([$internId, $today]);
-    $todayRecord = $todayStatement->fetch();
-
     // Each reminder has an independent one-shot follow-up, gated on the
     // first having already gone out and still being unresolved -- fired by
     // its own cron entry 5 minutes after the first (vercel.json), not by
@@ -157,8 +160,8 @@ foreach ($internIds as $internId) {
     // first reminder's own timing: Vercel Hobby crons land within "a
     // flexible time window of 1 hour" of their scheduled time, not on the
     // minute, so some days the gap will be longer.
-    $clockInDeadline = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_CLOCK_IN_DEADLINE', '09:00'));
-    $clockInDue = $now >= $clockInDeadline && !$todayRecord && !$todayIsHoliday;
+    $due = attendanceDueState($todayRecords[$internId] ?? null, $now, $todayIsHoliday);
+    $clockInDue = $due['clockIn'];
     if ($clockInDue && !reminderAlreadySentToday($pdo, $internId, 'clock_in')) {
         sendReminderPush($webPush, $pdo, $internId, "Don't forget to clock in", "You haven't clocked in yet today.", 'notify_clock_in');
         markReminderSent($pdo, $internId, 'clock_in');
@@ -170,10 +173,7 @@ foreach ($internIds as $internId) {
         $sent['clock_in_followup']++;
     }
 
-    // No upper bound, deliberately -- see the module comment above for why:
-    // a narrow window here silently missed every single real firing.
-    $shiftEnd = DateTime::createFromFormat('Y-m-d H:i', $today . ' ' . env('REMINDER_SHIFT_END', '18:00'));
-    $clockOutDue = $now >= $shiftEnd && $todayRecord && $todayRecord['clock_in'] && !$todayRecord['clock_out'];
+    $clockOutDue = $due['clockOut'];
     if ($clockOutDue && !reminderAlreadySentToday($pdo, $internId, 'clock_out')) {
         sendReminderPush($webPush, $pdo, $internId, 'Shift ending soon', 'Remember to clock out before you leave.', 'notify_clock_out');
         markReminderSent($pdo, $internId, 'clock_out');
@@ -186,7 +186,19 @@ foreach ($internIds as $internId) {
     }
 }
 
-$result = ['success' => true, 'checked' => count($internIds), 'sent' => $sent, 'at' => $now->format('Y-m-d H:i:s')];
+// Gateway icon badge: 1 while an intern owes a clock-in/out, 0 otherwise --
+// for every linked intern, not just those with push reminders on. These
+// runs are exactly when the due state flips on, and double as the periodic
+// full refresh MICROAPP_BADGES.md suggests; clearing happens immediately
+// on the clock-in/out itself (attendance.php).
+$badges = [];
+foreach ($pdo->query('SELECT gateway_sub, intern_id FROM app_identities WHERE intern_id IS NOT NULL')->fetchAll() as $identity) {
+    $badgeDue = attendanceDueState($todayRecords[$identity['intern_id']] ?? null, $now, $todayIsHoliday);
+    $badges[] = ['sub' => $identity['gateway_sub'], 'count' => ($badgeDue['clockIn'] || $badgeDue['clockOut']) ? 1 : 0];
+}
+publishBadges($badges);
+
+$result = ['success' => true, 'checked' => count($internIds), 'sent' => $sent, 'badges' => count($badges), 'at' => $now->format('Y-m-d H:i:s')];
 if (php_sapi_name() === 'cli') {
     echo json_encode($result, JSON_PRETTY_PRINT), PHP_EOL;
 } else {
