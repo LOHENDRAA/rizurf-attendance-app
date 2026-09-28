@@ -517,59 +517,28 @@ function attendanceDueState(?array $todayRecord, DateTime $now, bool $todayIsHol
     ];
 }
 
-/**
- * Publish icon-badge totals to the gateway: [['sub' => ..., 'count' => n]].
- * Never throws -- a badge is a nicety and must never break the clock-in/out
- * that changed it. Reuses this app's own API client, which a gateway admin
- * must have granted `gateway:badges` for attendance-api (else a logged 403).
- */
-function publishBadges(array $badges): void
+/** Everyone who owes a clock-in/out right now, for GET /gateway/badges. The
+ *  gateway polls this about once a minute; anyone not listed shows 0. */
+function internBadges(PDO $pdo): array
 {
-    if (!$badges) {
-        return;
-    }
-    if (filter_var(env('DEV_ALLOW_NO_AUTH', ''), FILTER_VALIDATE_BOOL)
-        && filter_var(env('DEV_MOCK_INTERNS', ''), FILTER_VALIDATE_BOOL)) {
-        error_log('[attendance-api] badges (dev, not sent): ' . json_encode($badges));
-        return;
-    }
-    try {
-        $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
-        $auth = 'Authorization: Basic ' . base64_encode(envOrFail('INTERN_DB_CLIENT_ID') . ':' . envOrFail('INTERN_DB_CLIENT_SECRET'));
-        foreach (array_chunk($badges, 500) as $chunk) {
-            [$status, $body] = httpJson('POST', "$gateway/api/badges", [$auth, 'Content-Type: application/json'], [
-                'service' => env('SERVICE_ID', 'attendance-api'),
-                'badges' => $chunk,
-            ], 4);
-            if ($status !== 200) {
-                error_log("[attendance-api] badges: gateway returned $status " . (is_string($body) ? $body : json_encode($body)));
-            }
+    $now = new DateTime();
+    $today = $now->format('Y-m-d');
+    $holiday = array_key_exists($today, companyHolidays($today, $today));
+    $rows = $pdo->prepare(
+        'SELECT i.gateway_sub, a.id, a.clock_in, a.clock_out
+           FROM app_identities i
+           LEFT JOIN attendance_records a ON a.intern_id = i.intern_id AND a.attendance_date = ?
+          WHERE i.intern_id IS NOT NULL'
+    );
+    $rows->execute([$today]);
+    $badges = [];
+    foreach ($rows->fetchAll() as $row) {
+        $due = attendanceDueState($row['id'] === null ? null : $row, $now, $holiday);
+        if ($due['clockIn'] || $due['clockOut']) {
+            $badges[] = ['sub' => $row['gateway_sub'], 'count' => 1];
         }
-    } catch (Throwable $e) {
-        error_log('[attendance-api] badges: could not reach the gateway: ' . $e->getMessage());
     }
-}
-
-/** Recompute and publish one intern's badge -- called right after they clock
- *  in/out, so it clears immediately instead of waiting for the next cron. */
-function publishInternBadge(PDO $pdo, string $internId): void
-{
-    try {
-        $identity = $pdo->prepare('SELECT gateway_sub FROM app_identities WHERE intern_id = ?');
-        $identity->execute([$internId]);
-        $sub = $identity->fetchColumn();
-        if ($sub === false) {
-            return;
-        }
-        $now = new DateTime();
-        $today = $now->format('Y-m-d');
-        $record = $pdo->prepare('SELECT * FROM attendance_records WHERE intern_id = ? AND attendance_date = ?');
-        $record->execute([$internId, $today]);
-        $due = attendanceDueState($record->fetch() ?: null, $now, array_key_exists($today, companyHolidays($today, $today)));
-        publishBadges([['sub' => $sub, 'count' => ($due['clockIn'] || $due['clockOut']) ? 1 : 0]]);
-    } catch (Throwable $e) {
-        error_log('[attendance-api] badge for one intern: ' . $e->getMessage());
-    }
+    return $badges;
 }
 
 // ----------------------------------------------------------------------------

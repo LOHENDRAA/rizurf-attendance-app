@@ -126,7 +126,6 @@ try {
         $update->execute([$mode, $latitude, $longitude, $qr, $existing['id']]);
     }
     $pdo->commit();
-    publishInternBadge($pdo, $internId);
 
     respond([
         'success' => true,

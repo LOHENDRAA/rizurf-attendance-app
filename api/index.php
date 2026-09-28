@@ -53,10 +53,12 @@ $routes = [
     '/api/admin/attendance' => ['GET'],
     '/api/admin/attendance-calendar' => ['GET'],
     '/api/admin/qr' => ['GET', 'POST'],
+    '/gateway/badges' => ['GET'],
 ];
 // cron-reminders checks its own CRON_SECRET (it's Vercel's scheduler calling,
-// not a gateway-signed-in caller) rather than the normal auth below.
-const PUBLIC_PATHS = ['/health', '/openapi.json', '/api/cron-reminders'];
+// not a gateway-signed-in caller), and /gateway/badges its own gateway token
+// scope, rather than the normal auth below.
+const PUBLIC_PATHS = ['/health', '/openapi.json', '/api/cron-reminders', '/gateway/badges'];
 
 // These exist only to let a signed-in person manage their own identity/
 // devices/notifications -- there's no legitimate service-to-service caller
@@ -122,6 +124,16 @@ if (isset($routes[$apiPath])) {
     }
     if ($apiPath === '/openapi.json') {
         sendJson(200, openapiDocument());
+    }
+    if ($apiPath === '/gateway/badges') {
+        // MICROAPP_BADGES.md: only the gateway may read counts -- a verified
+        // gateway access token for this service, carrying the badges scope.
+        $auth = authenticate();
+        $scopes = explode(' ', (string) ($auth['claims']['scope'] ?? ''));
+        if (($auth['kind'] ?? null) !== 'token' || !in_array('gateway:badges:read', $scopes, true)) {
+            sendError(401, 'UNAUTHENTICATED', 'Gateway token required.');
+        }
+        sendJson(200, ['badges' => internBadges(database())]);
     }
     if ($apiPath === '/api/me') {
         sendJson(200, currentIdentity());

@@ -186,19 +186,7 @@ foreach ($internIds as $internId) {
     }
 }
 
-// Gateway icon badge: 1 while an intern owes a clock-in/out, 0 otherwise --
-// for every linked intern, not just those with push reminders on. These
-// runs are exactly when the due state flips on, and double as the periodic
-// full refresh MICROAPP_BADGES.md suggests; clearing happens immediately
-// on the clock-in/out itself (attendance.php).
-$badges = [];
-foreach ($pdo->query('SELECT gateway_sub, intern_id FROM app_identities WHERE intern_id IS NOT NULL')->fetchAll() as $identity) {
-    $badgeDue = attendanceDueState($todayRecords[$identity['intern_id']] ?? null, $now, $todayIsHoliday);
-    $badges[] = ['sub' => $identity['gateway_sub'], 'count' => ($badgeDue['clockIn'] || $badgeDue['clockOut']) ? 1 : 0];
-}
-publishBadges($badges);
-
-$result = ['success' => true, 'checked' => count($internIds), 'sent' => $sent, 'badges' => count($badges), 'at' => $now->format('Y-m-d H:i:s')];
+$result = ['success' => true, 'checked' => count($internIds), 'sent' => $sent, 'at' => $now->format('Y-m-d H:i:s')];
 if (php_sapi_name() === 'cli') {
     echo json_encode($result, JSON_PRETTY_PRINT), PHP_EOL;
 } else {
