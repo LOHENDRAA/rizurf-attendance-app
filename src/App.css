@@ -186,10 +186,3 @@ main { max-width: none; padding: 42px 32px 58px; }.welcome-row { align-items: st
 
 .topbar-logo { height: 40px; width: auto; flex: none; }
 @media (max-width: 560px) { .topbar-logo { height: 32px; } }
-.schedule-summary { display: grid; gap: 8px; margin: 4px 0 14px; }
-.schedule-group { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; border: 1px solid var(--neutral-border); border-radius: 10px; }
-.schedule-group p { margin: 0; color: var(--neutral-dark); font-size: 12px; line-height: 1.5; }
-.schedule-mode { flex: none; min-width: 72px; font-size: 10px; font-weight: 700; letter-spacing: .6px; text-transform: uppercase; }
-.schedule-mode.onsite { color: var(--status-success); }
-.schedule-mode.hybrid { color: var(--status-warning); }
-.schedule-mode.remote { color: var(--brand-teal-dark); }

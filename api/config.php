@@ -479,15 +479,23 @@ function companyHolidays(string $start, string $end): array
 /** Dev-only stand-in built from the mock roster -- same gate as the others. */
 function mockScheduleForDate(): array
 {
-    return array_map(static fn (array $intern): array => [
-        'name' => $intern['first_name'] . ' ' . $intern['last_name'],
-        'department' => null,
-        'mode' => $intern['mode'] === 'Hybrid' ? 'hybrid' : 'onsite',
-    ], array_values(mockInternDirectory()));
+    $schedule = [];
+    foreach (mockInternDirectory() as $intern) {
+        $schedule[strtolower($intern['email_address'])] = $intern['mode'] === 'Hybrid' ? 'hybrid' : 'onsite';
+    }
+    return $schedule;
 }
 
-/** [['name', 'department', 'mode' => onsite|hybrid|remote], ...] for $date,
- *  leaving out anyone not scheduled that day. Empty on any failure. */
+/** One intern's scheduled mode for $date (onsite|hybrid|remote), or null
+ *  when they're not on the rota or the rota can't be read. */
+function scheduledMode(string $internId, string $date): ?string
+{
+    $email = strtolower((string) (internDirectory()[$internId]['email_address'] ?? ''));
+    return $email === '' ? null : (scheduleForDate($date)[$email] ?? null);
+}
+
+/** email (lowercased) => onsite|hybrid|remote for $date, leaving out anyone
+ *  not scheduled that day. Empty on any failure. */
 function scheduleForDate(string $date): array
 {
     if (filter_var(env('DEV_ALLOW_NO_AUTH', ''), FILTER_VALIDATE_BOOL)
@@ -516,8 +524,8 @@ function scheduleForDate(string $date): array
             }
             foreach ($body['items'] as $item) {
                 $mode = $item['days'][0]['mode'] ?? 'not_scheduled';
-                if ($mode !== 'not_scheduled') {
-                    $people[] = ['name' => (string) ($item['name'] ?? ''), 'department' => $item['department'] ?? null, 'mode' => $mode];
+                if ($mode !== 'not_scheduled' && !empty($item['email'])) {
+                    $people[strtolower($item['email'])] = $mode;
                 }
             }
             if ($offset + 200 >= (int) ($body['total'] ?? 0)) {

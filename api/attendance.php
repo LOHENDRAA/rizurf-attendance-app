@@ -40,6 +40,7 @@ try {
             'linked' => true,
             'records' => currentRecords($pdo, $internId),
             'today' => todayRecord($pdo, $internId),
+            'scheduledMode' => scheduledMode($internId, date('Y-m-d')),
         ]);
     }
 
@@ -59,6 +60,14 @@ try {
 
     if (!in_array($action, ['in', 'out'], true) || !in_array($mode, ['Office', 'Hybrid'], true)) {
         respond(['success' => false, 'message' => 'Choose a valid attendance action and mode.'], 422);
+    }
+
+    // The rota decides how someone may clock in: onsite days need the office
+    // QR + GPS. Hybrid/remote days allow either. Not on the rota, or the rota
+    // unreachable, means no restriction -- that dependency never blocks
+    // attendance. Clock-out already has to match clock-in's mode.
+    if ($action === 'in' && $mode === 'Hybrid' && scheduledMode($internId, date('Y-m-d')) === 'onsite') {
+        respond(['success' => false, 'message' => 'Please clock in at the office with the QR code.'], 422);
     }
 
     // The actual anti-buddy-punching check -- a device that already clocked

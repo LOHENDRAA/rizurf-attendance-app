@@ -73,7 +73,7 @@ try {
         respond(['success' => false, 'message' => 'Invalid date.'], 422);
     }
 
-    respond(['success' => true, 'date' => $date, 'records' => allAttendanceForAdmin($pdo, $date), 'schedule' => scheduleForDate($date)]);
+    respond(['success' => true, 'date' => $date, 'records' => allAttendanceForAdmin($pdo, $date)]);
 } catch (ConfigException $error) {
     throw $error;
 } catch (InternDbException $error) {
