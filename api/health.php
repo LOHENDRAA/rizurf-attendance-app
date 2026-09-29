@@ -18,27 +18,10 @@ function healthDocument(): array
         'database' => checkDatabase(),
         'gateway' => cachedCheck('gateway', fn () => pingOk(rtrim((string) env('GATEWAY_URL', ''), '/') . '/.well-known/jwks.json')),
         'intern_database' => cachedCheck('intern_database', fn () => pingOk(rtrim((string) env('INTERN_DB_URL', ''), '/') . '/health')),
-        // web-push generates this key for every notification; if it can't,
-        // every reminder silently fails (OPENSSL_CONF -> api/openssl.cnf).
-        'push' => openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]) !== false,
-        // TEMPORARY diagnostic -- remove once push is true in production.
-        'push_debug' => [
-            'env_set' => getenv('OPENSSL_CONF') !== false,
-            'env_file_exists' => getenv('OPENSSL_CONF') !== false && is_file((string) getenv('OPENSSL_CONF')),
-            'bundled_file_exists' => is_file(__DIR__ . '/openssl.cnf'),
-            'env_matches_bundled' => realpath((string) getenv('OPENSSL_CONF')) === realpath(__DIR__ . '/openssl.cnf'),
-            'env_path' => getenv('OPENSSL_CONF'),
-            'bundled_path' => realpath(__DIR__ . '/openssl.cnf'),
-            'same_content' => @md5_file((string) getenv('OPENSSL_CONF')) === @md5_file(__DIR__ . '/openssl.cnf'),
-            'with_explicit_config' => openssl_pkey_new(['config' => __DIR__ . '/openssl.cnf', 'curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]) !== false,
-            'openssl_errors' => (static function (): array {
-                $errors = [];
-                while (($e = openssl_error_string()) !== false) {
-                    $errors[] = $e;
-                }
-                return $errors;
-            })(),
-        ],
+        // web-push generates this key for every notification (same call as
+        // the patched vendor Encryption.php); if it can't, every reminder
+        // silently fails.
+        'push' => openssl_pkey_new(['config' => __DIR__ . '/openssl.cnf', 'curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]) !== false,
     ];
 
     if (!$checks['database']) {

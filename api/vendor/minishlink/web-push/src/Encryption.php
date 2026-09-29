@@ -249,6 +249,11 @@ class Encryption
     private static function createLocalKeyObject(): array
     {
         $keyResource = openssl_pkey_new([
+            // ponytail: local patch to vendored web-push -- Vercel forces its own
+            // OPENSSL_CONF, which lacks what openssl_pkey_new() needs, so point at
+            // ours explicitly. A `composer update` drops this; /health's `push`
+            // check (and silent reminders) will show it.
+            'config'           => dirname(__DIR__, 4) . '/openssl.cnf',
             'curve_name'       => 'prime256v1',
             'private_key_type' => OPENSSL_KEYTYPE_EC,
         ]);
