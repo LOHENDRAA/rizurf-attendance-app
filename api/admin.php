@@ -23,6 +23,16 @@ try {
         respond(['success' => false, 'message' => 'Method not allowed.'], 405);
     }
 
+    // Every intern, for the admin's filter-by-name dropdown.
+    if (isset($_GET['interns'])) {
+        $interns = [];
+        foreach (internDirectory() as $intern) {
+            $interns[] = ['id' => $intern['id'], 'name' => trim(($intern['first_name'] ?? '') . ' ' . ($intern['last_name'] ?? ''))];
+        }
+        usort($interns, static fn (array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        respond(['success' => true, 'interns' => $interns]);
+    }
+
     $internId = trim((string) ($_GET['intern'] ?? '')) ?: null;
     if ($internId !== null && !preg_match('/^[0-9a-f-]{36}$/i', $internId)) {
         respond(['success' => false, 'message' => 'Invalid intern id.'], 422);
