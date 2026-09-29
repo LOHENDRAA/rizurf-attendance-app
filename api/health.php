@@ -27,6 +27,17 @@ function healthDocument(): array
             'env_file_exists' => getenv('OPENSSL_CONF') !== false && is_file((string) getenv('OPENSSL_CONF')),
             'bundled_file_exists' => is_file(__DIR__ . '/openssl.cnf'),
             'env_matches_bundled' => realpath((string) getenv('OPENSSL_CONF')) === realpath(__DIR__ . '/openssl.cnf'),
+            'env_path' => getenv('OPENSSL_CONF'),
+            'bundled_path' => realpath(__DIR__ . '/openssl.cnf'),
+            'same_content' => @md5_file((string) getenv('OPENSSL_CONF')) === @md5_file(__DIR__ . '/openssl.cnf'),
+            'with_explicit_config' => openssl_pkey_new(['config' => __DIR__ . '/openssl.cnf', 'curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]) !== false,
+            'openssl_errors' => (static function (): array {
+                $errors = [];
+                while (($e = openssl_error_string()) !== false) {
+                    $errors[] = $e;
+                }
+                return $errors;
+            })(),
         ],
     ];
 
