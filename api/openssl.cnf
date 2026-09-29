@@ -1,0 +1,5 @@
+# Pointed at by the OPENSSL_CONF env var (Vercel project settings). Without
+# a config file, PHP's openssl_pkey_new() fails, and web-push needs it to
+# encrypt every notification. PHP rejects default_bits = 0, hence this line.
+[req]
+default_bits = 2048

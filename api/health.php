@@ -18,6 +18,9 @@ function healthDocument(): array
         'database' => checkDatabase(),
         'gateway' => cachedCheck('gateway', fn () => pingOk(rtrim((string) env('GATEWAY_URL', ''), '/') . '/.well-known/jwks.json')),
         'intern_database' => cachedCheck('intern_database', fn () => pingOk(rtrim((string) env('INTERN_DB_URL', ''), '/') . '/health')),
+        // web-push generates this key for every notification; if it can't,
+        // every reminder silently fails (OPENSSL_CONF -> api/openssl.cnf).
+        'push' => openssl_pkey_new(['curve_name' => 'prime256v1', 'private_key_type' => OPENSSL_KEYTYPE_EC]) !== false,
     ];
 
     if (!$checks['database']) {
