@@ -295,32 +295,33 @@ function mockDepartmentDirectory(): array
     return ['DEP-0001' => 'Marketing', 'DEP-0002' => 'Operations'];
 }
 
-function departmentApiToken(): string
+/**
+ * A client_credentials token for another microapp ($audience), from this
+ * app's own gateway client (INTERN_DB_CLIENT_ID/SECRET), cached per audience
+ * until shortly before expiry. The gateway admin must have granted the
+ * client that audience, else this throws with the gateway's own reason
+ * (e.g. 'has no grants for "calendar-db"'). Short timeout: every caller is
+ * a best-effort lookup that must not slow the page down.
+ */
+function serviceToken(string $audience): string
 {
-    static $token = null;
-    static $expiresAt = 0;
-    if ($token !== null && time() < $expiresAt - 30) {
-        return $token;
+    static $cache = [];
+    if (isset($cache[$audience]) && time() < $cache[$audience]['expiresAt'] - 30) {
+        return $cache[$audience]['token'];
     }
-    $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
     $clientId = envOrFail('INTERN_DB_CLIENT_ID');
     $clientSecret = envOrFail('INTERN_DB_CLIENT_SECRET');
-    $audience = env('DEPARTMENT_API_AUDIENCE', 'department-api');
-
-    // A short timeout -- this whole lookup is best-effort (departmentName()
-    // falls back to the raw code), so it must never make the page people are
-    // waiting on noticeably slower just because this one dependency is down.
-    [$status, $body] = httpJson('POST', "$gateway/oauth/token", [
+    [$status, $body] = httpJson('POST', rtrim(envOrFail('GATEWAY_URL'), '/') . '/oauth/token', [
         'Authorization: Basic ' . base64_encode("$clientId:$clientSecret"),
         'Content-Type: application/json',
     ], ['grant_type' => 'client_credentials', 'audience' => $audience], 4);
 
     if ($status !== 200 || !isset($body['access_token'])) {
-        throw new RuntimeException("gateway /oauth/token for department-api returned $status");
+        $reason = is_array($body) ? ($body['error']['message'] ?? '') : '';
+        throw new RuntimeException("gateway /oauth/token for $audience returned $status $reason");
     }
-    $token = $body['access_token'];
-    $expiresAt = time() + (int) ($body['expires_in'] ?? 3600);
-    return $token;
+    $cache[$audience] = ['token' => $body['access_token'], 'expiresAt' => time() + (int) ($body['expires_in'] ?? 3600)];
+    return $body['access_token'];
 }
 
 /**
@@ -357,7 +358,7 @@ function departmentDirectory(): array
     try {
         $base = rtrim(env('DEPARTMENT_API_URL', 'https://department-zeta.vercel.app'), '/');
         [$status, $body] = httpJson('GET', "$base/api/departments", [
-            'Authorization: Bearer ' . departmentApiToken(),
+            'Authorization: Bearer ' . serviceToken(env('DEPARTMENT_API_AUDIENCE', 'department-api')),
             'Accept: application/json',
         ], null, 4);
         // The service returns a bare JSON array, not {"data": [...]}.
@@ -404,33 +405,6 @@ function mockCompanyHolidays(): array
     return [date('Y-m-d', strtotime('+10 days')) => 'Sample Public Holiday'];
 }
 
-/** Reuses this app's own gateway client (INTERN_DB_CLIENT_ID/SECRET), just
- *  asking for a token scoped to a different audience -- the same pattern
- *  departmentApiToken() uses for department-api. */
-function calendarDbToken(): string
-{
-    static $token = null;
-    static $expiresAt = 0;
-    if ($token !== null && time() < $expiresAt - 30) {
-        return $token;
-    }
-    $gateway = rtrim(envOrFail('GATEWAY_URL'), '/');
-    $clientId = envOrFail('INTERN_DB_CLIENT_ID');
-    $clientSecret = envOrFail('INTERN_DB_CLIENT_SECRET');
-    $audience = env('CALENDAR_DB_AUDIENCE', 'calendar-db');
-
-    [$status, $body] = httpJson('POST', "$gateway/oauth/token", [
-        'Authorization: Basic ' . base64_encode("$clientId:$clientSecret"),
-        'Content-Type: application/json',
-    ], ['grant_type' => 'client_credentials', 'audience' => $audience], 4);
-
-    if ($status !== 200 || !isset($body['access_token'])) {
-        throw new RuntimeException("gateway /oauth/token for calendar-db returned $status");
-    }
-    $token = $body['access_token'];
-    $expiresAt = time() + (int) ($body['expires_in'] ?? 3600);
-    return $token;
-}
 
 /**
  * date (Y-m-d) -> holiday title, for every day in [$start, $end] on Calendar
@@ -466,11 +440,13 @@ function companyHolidays(string $start, string $end): array
         $base = rtrim(env('CALENDAR_DB_URL', 'https://calendar-db.vercel.app'), '/');
         $query = http_build_query([
             'calendar_id' => 'company-holidays',
-            'from' => "{$start}T00:00:00Z",
-            'to' => "{$end}T23:59:59Z",
+            // Local-day bounds: an all-day holiday is stored as local midnight
+            // (e.g. 16:00Z the day before), which a UTC window would miss.
+            'from' => (new DateTime("$start 00:00:00"))->format(DATE_ATOM),
+            'to' => (new DateTime("$end 23:59:59"))->format(DATE_ATOM),
         ]);
         [$status, $body] = httpJson('GET', "$base/events?$query", [
-            'Authorization: Bearer ' . calendarDbToken(),
+            'Authorization: Bearer ' . serviceToken(env('CALENDAR_DB_AUDIENCE', 'calendar-db')),
             'Accept: application/json',
         ], null, 4);
         $list = is_array($body) ? (array_is_list($body) ? $body : ($body['events'] ?? $body['data'] ?? null)) : null;
@@ -481,7 +457,8 @@ function companyHolidays(string $start, string $end): array
                 }
                 $startAt = (string) ($event['startAt'] ?? $event['start_at'] ?? '');
                 if ($startAt !== '') {
-                    $byDate[substr($startAt, 0, 10)] = (string) ($event['title'] ?? 'Public holiday');
+                    $localDate = (new DateTime($startAt))->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d');
+                    $byDate[$localDate] = (string) ($event['title'] ?? 'Public holiday');
                 }
             }
             $ttl = 21600; // working: re-check every 6 hours, not every request
@@ -491,6 +468,69 @@ function companyHolidays(string $start, string $end): array
     }
     @file_put_contents($cacheFile, json_encode(['data' => $byDate, 'at' => time(), 'ttl' => $ttl]));
     return $byDate;
+}
+
+// ----------------------------------------------------------------------------
+// Intern Schedule service (intern-schedule) - the office rota: who's onsite,
+// hybrid or remote on a given day. Read-only and best-effort, same as
+// departmentName(): an unreachable rota just shows nothing.
+// ----------------------------------------------------------------------------
+
+/** Dev-only stand-in built from the mock roster -- same gate as the others. */
+function mockScheduleForDate(): array
+{
+    return array_map(static fn (array $intern): array => [
+        'name' => $intern['first_name'] . ' ' . $intern['last_name'],
+        'department' => null,
+        'mode' => $intern['mode'] === 'Hybrid' ? 'hybrid' : 'onsite',
+    ], array_values(mockInternDirectory()));
+}
+
+/** [['name', 'department', 'mode' => onsite|hybrid|remote], ...] for $date,
+ *  leaving out anyone not scheduled that day. Empty on any failure. */
+function scheduleForDate(string $date): array
+{
+    if (filter_var(env('DEV_ALLOW_NO_AUTH', ''), FILTER_VALIDATE_BOOL)
+        && filter_var(env('DEV_MOCK_INTERNS', ''), FILTER_VALIDATE_BOOL)) {
+        return mockScheduleForDate();
+    }
+
+    $cacheFile = sys_get_temp_dir() . "/attendance_schedule_$date.json";
+    if (is_file($cacheFile)) {
+        $cached = json_decode((string) file_get_contents($cacheFile), true);
+        if (is_array($cached) && ($cached['at'] ?? 0) > time() - (int) ($cached['ttl'] ?? 0)) {
+            return $cached['data'];
+        }
+    }
+
+    $people = [];
+    $ttl = 60; // unreachable -- don't retry on every request for a minute
+    try {
+        $base = rtrim(env('INTERN_SCHEDULE_URL', 'https://intern-schedule-pink.vercel.app'), '/');
+        $token = serviceToken(env('INTERN_SCHEDULE_AUDIENCE', 'intern-schedule'));
+        for ($offset = 0; ; $offset += 200) {
+            $query = http_build_query(['from' => $date, 'to' => $date, 'include_weekends' => 'true', 'limit' => 200, 'offset' => $offset]);
+            [$status, $body] = httpJson('GET', "$base/schedules?$query", ['Authorization: Bearer ' . $token, 'Accept: application/json'], null, 4);
+            if ($status !== 200 || !isset($body['items'])) {
+                throw new RuntimeException("intern-schedule GET /schedules returned $status");
+            }
+            foreach ($body['items'] as $item) {
+                $mode = $item['days'][0]['mode'] ?? 'not_scheduled';
+                if ($mode !== 'not_scheduled') {
+                    $people[] = ['name' => (string) ($item['name'] ?? ''), 'department' => $item['department'] ?? null, 'mode' => $mode];
+                }
+            }
+            if ($offset + 200 >= (int) ($body['total'] ?? 0)) {
+                break;
+            }
+        }
+        $ttl = 600; // working: rota edits show up within 10 minutes
+    } catch (Throwable $e) {
+        $people = [];
+        error_log('[attendance-api] schedule unavailable: ' . $e->getMessage());
+    }
+    @file_put_contents($cacheFile, json_encode(['data' => $people, 'at' => time(), 'ttl' => $ttl]));
+    return $people;
 }
 
 // ----------------------------------------------------------------------------

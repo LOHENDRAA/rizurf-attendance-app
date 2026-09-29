@@ -47,7 +47,6 @@ $routes = [
     '/api/leave' => ['GET', 'POST'],
     '/api/me' => ['GET'],
     '/api/devices' => ['GET', 'POST'],
-    '/api/signout' => ['POST'],
     '/api/subscribe' => ['GET', 'POST'],
     '/api/cron-reminders' => ['GET'],
     '/api/admin/attendance' => ['GET'],
@@ -157,14 +156,6 @@ if (isset($routes[$apiPath])) {
             sendError(404, 'RESOURCE_NOT_FOUND', 'That device is not linked to your account.');
         }
         sendJson(200, ['success' => true, 'devices' => internDeviceLinks($pdo, $internId)]);
-    }
-    if ($apiPath === '/api/signout') {
-        // Ends this app's own session (S24 leaves sign-out itself authoritative
-        // at the gateway). The frontend then sends the browser straight to the
-        // gateway's own site -- not back through our '/' -- so a live gateway
-        // SSO session can't silently bounce them right back into this app.
-        clearAppSession();
-        sendJson(200, ['success' => true, 'gatewayUrl' => rtrim(envOrFail('GATEWAY_URL'), '/') . '/']);
     }
     if ($apiPath === '/api/subscribe') {
         require __DIR__ . '/subscribe.php';
