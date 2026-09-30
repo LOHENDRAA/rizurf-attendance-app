@@ -92,7 +92,7 @@ try {
 
     $today = date('Y-m-d');
     $minutes = ((int) date('G') * 60) + (int) date('i');
-    $status = ($minutes >= 530 && $minutes <= 550) ? 'On time' : 'Late';
+    $status = $minutes <= 550 ? 'On time' : 'Late'; // on time up to 09:10, early included
     $qr = $mode === 'Office' ? officeQr() : null;
 
     $pdo->beginTransaction();
