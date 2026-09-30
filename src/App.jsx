@@ -4,7 +4,7 @@ import {
   Home, MapPin, Moon, QrCode, ScanLine, Smartphone,
   ShieldCheck, Sun, X,
 } from 'lucide-react'
-import { Html5Qrcode } from 'html5-qrcode'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import QRCode from 'qrcode'
 import './App.css'
 
@@ -414,12 +414,18 @@ function App() {
 
   const startScanner = async () => {
     if (!window.isSecureContext && !['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-      setScannerError('Camera scanning requires HTTPS on a phone. Use the QR image upload below or choose Hybrid.')
+      setScannerError('Camera scanning requires HTTPS on a phone. Choose Hybrid instead.')
       return
     }
-    const scanner = new Html5Qrcode('qr-reader')
+    // QR only (the default tries every barcode format on every frame), and
+    // the browser's native detector where it has one (Chrome on Android).
+    const scanner = new Html5Qrcode('qr-reader', {
+      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+      useBarCodeDetectorIfSupported: true,
+      verbose: false,
+    })
     scannerRef.current = scanner
-    const config = { fps: 10, qrbox: { width: 220, height: 220 } }
+    const config = { fps: 20, qrbox: { width: 220, height: 220 } }
     const onDecoded = (decodedText) => {
       if (scanHandledRef.current) return
       if (decodedText.trim() !== currentQr) {
@@ -436,7 +442,7 @@ function App() {
       return
     } catch (error) {
       if (error?.name === 'NotAllowedError') {
-        setScannerError('Camera access was blocked. Allow camera permission for this site, or use the QR image upload below.')
+        setScannerError('Camera access was blocked. Allow camera permission for this site, then try again.')
         return
       }
       // Some Android browsers (seen on Honor/Huawei devices) reject a bare
@@ -449,15 +455,15 @@ function App() {
     try {
       const cameras = await Html5Qrcode.getCameras()
       if (!cameras.length) {
-        setScannerError('No camera was found on this device. Use the QR image upload below or choose Hybrid.')
+        setScannerError('No camera was found on this device. Choose Hybrid instead.')
         return
       }
       const rearCamera = cameras.find((camera) => /back|rear|environment/i.test(camera.label)) || cameras[cameras.length - 1]
       await scanner.start(rearCamera.id, config, onDecoded, () => {})
     } catch (error) {
       setScannerError(error?.name === 'NotAllowedError'
-        ? 'Camera access was blocked. Allow camera permission for this site, or use the QR image upload below.'
-        : 'Could not start the camera on this device. Use the QR image upload below or choose Hybrid.')
+        ? 'Camera access was blocked. Allow camera permission for this site, then try again.'
+        : 'Could not start the camera on this device. Choose Hybrid instead.')
     }
   }
 
