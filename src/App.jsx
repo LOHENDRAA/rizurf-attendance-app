@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Bell, Briefcase, Check, ChevronLeft, ChevronRight, Clock3, Download,
-  Home, MapPin, Moon, QrCode, ScanLine, Smartphone,
+  Home, MapPin, Moon, QrCode, RefreshCw, ScanLine, Smartphone,
   ShieldCheck, Sun, X,
 } from 'lucide-react'
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
@@ -681,7 +681,7 @@ function App() {
     <div className="app-shell">
       <header className="topbar">
         <img src={theme === 'dark' ? './rizurf-logo-dark.png' : './rizurf-logo-light.png'} alt="Rizurf Realty" className="topbar-logo" />
-        <div className="topbar-actions"><span className="system-status"><i></i> All systems operational</span>{meLoaded ? <button className="profile-chip" aria-label="Open profile" onClick={() => selectTab('profile')}>{photoUrl ? <img src={photoUrl} alt="" className="avatar" onError={() => setAvatarFailed(true)} /> : <span className="avatar">{initials}</span>}<span className="profile-name">{displayName}</span><ChevronRight size={15} /></button> : <ProfileChipSkeleton />}</div>
+        <div className="topbar-actions"><span className="system-status"><i></i> All systems operational</span><button className="icon-button" aria-label="Refresh" title="Refresh" onClick={() => window.location.reload()}><RefreshCw size={19} /></button>{meLoaded ? <button className="profile-chip" aria-label="Open profile" onClick={() => selectTab('profile')}>{photoUrl ? <img src={photoUrl} alt="" className="avatar" onError={() => setAvatarFailed(true)} /> : <span className="avatar">{initials}</span>}<span className="profile-name">{displayName}</span><ChevronRight size={15} /></button> : <ProfileChipSkeleton />}</div>
       </header>
 
       <main id="overview" className={`tab-content ${activeTab}-tab`}>
