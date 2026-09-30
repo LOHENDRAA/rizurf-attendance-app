@@ -9,6 +9,9 @@
 --     There is NO interns table here (that service owns it, SS-13).
 --   * No password column - authentication is the Rizurf gateway's (SS-24).
 --   * ENUMs instead of CHECK-in lists; native ON UPDATE CURRENT_TIMESTAMP.
+--   * Every table pins utf8mb4: if the database already exists with a latin1
+--     default, CREATE DATABASE IF NOT EXISTS changes nothing and tables would
+--     silently inherit latin1 -- which rejects names like "⁠Fitzkhonglynn".
 --
 -- MySQL 5.7 parses but does not enforce the CHECK constraint below (8.0.16+
 -- and MariaDB 10.2+ do). The app validates clock order regardless.
@@ -50,7 +53,7 @@ CREATE TABLE IF NOT EXISTS app_identities (
   -- per intern" without needing a partial index.
   UNIQUE KEY app_identities_intern (intern_id),
   KEY app_identities_email (email_address)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ----------------------------------------------------------------------------
@@ -81,7 +84,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   KEY attendance_intern_idx (intern_id, attendance_date),
   CONSTRAINT attendance_clock_order
     CHECK (clock_out IS NULL OR clock_in IS NULL OR clock_out >= clock_in)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ----------------------------------------------------------------------------
@@ -109,7 +112,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   KEY leave_status_idx (status),
   CONSTRAINT leave_reviewed_by_fk FOREIGN KEY (reviewed_by)
     REFERENCES app_identities (gateway_sub) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ----------------------------------------------------------------------------
@@ -132,7 +135,7 @@ CREATE TABLE IF NOT EXISTS device_links (
   last_used_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (device_id),
   KEY device_links_intern_idx (intern_id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ----------------------------------------------------------------------------
@@ -153,7 +156,7 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   PRIMARY KEY (id),
   UNIQUE KEY push_subscriptions_endpoint (endpoint(255)),
   KEY push_subscriptions_intern_idx (intern_id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ----------------------------------------------------------------------------
@@ -169,7 +172,7 @@ CREATE TABLE IF NOT EXISTS reminders_sent (
   created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY reminders_sent_one_per_day (intern_id, reminder_type, reminder_date)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ----------------------------------------------------------------------------
@@ -185,7 +188,7 @@ CREATE TABLE IF NOT EXISTS office_settings (
   qr_updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   qr_updated_by  VARCHAR(320) NULL,
   PRIMARY KEY (id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
 -- ----------------------------------------------------------------------------
