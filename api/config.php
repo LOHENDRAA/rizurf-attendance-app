@@ -692,14 +692,14 @@ function requireAdmin(): void
 }
 
 /**
- * Every intern's attendance for one date, newest-by-name -- the admin "all
+ * Every intern's attendance for one date, earliest clock-in first -- the admin "all
  * attendance" view. Names come from the Intern Database directory, not this
  * app's own storage (SS-13 still applies: this app has no intern records
  * of its own).
  */
 function allAttendanceForAdmin(PDO $pdo, string $date): array
 {
-    $statement = $pdo->prepare('SELECT * FROM attendance_feed WHERE attendance_date = ?');
+    $statement = $pdo->prepare('SELECT * FROM attendance_feed WHERE attendance_date = ? ORDER BY clock_in IS NULL, clock_in');
     $statement->execute([$date]);
     $directory = internDirectory();
 
@@ -712,7 +712,6 @@ function allAttendanceForAdmin(PDO $pdo, string $date): array
         return $record;
     }, $statement->fetchAll());
 
-    usort($records, static fn (array $a, array $b): int => strcasecmp($a['internName'], $b['internName']));
     return $records;
 }
 
@@ -721,8 +720,7 @@ function allAttendanceForAdmin(PDO $pdo, string $date): array
  * intern and/or one status), not just one day -- powers the admin
  * calendar's "show all late/on-time this month" status filter, so clicking
  * Late isn't limited to whichever single day happens to be selected.
- * Newest first, unlike allAttendanceForAdmin()'s alphabetical order, since
- * this is a log of a whole month rather than a single day's roster.
+ * Newest day first, earliest clock-in first within a day.
  */
 function allAttendanceForAdminMonth(PDO $pdo, string $start, string $end, ?string $internId, ?string $status): array
 {
@@ -736,7 +734,7 @@ function allAttendanceForAdminMonth(PDO $pdo, string $start, string $end, ?strin
         $sql .= ' AND effective_status = ?';
         $params[] = $status;
     }
-    $sql .= ' ORDER BY attendance_date DESC';
+    $sql .= ' ORDER BY attendance_date DESC, clock_in IS NULL, clock_in';
 
     $statement = $pdo->prepare($sql);
     $statement->execute($params);
