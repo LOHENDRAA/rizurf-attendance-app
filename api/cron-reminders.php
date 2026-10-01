@@ -137,6 +137,11 @@ $webPush = new WebPush([
 
 $now = new DateTime();
 $today = $now->format('Y-m-d');
+
+// Close anyone still clocked in once 18:00 has passed (cron-job.org fires
+// this at 18:00 sharp) -- before the reminder checks, so nobody gets a
+// "clock out" nag for a record that is now closed.
+$autoClosed = autoClockOut($pdo, $now);
 $sent = ['clock_in' => 0, 'clock_in_followup' => 0, 'clock_out' => 0, 'clock_out_followup' => 0];
 
 // Only the "you haven't clocked in yet" nags skip on a company holiday --
@@ -188,7 +193,7 @@ foreach ($internIds as $internId) {
     }
 }
 
-$result = ['success' => true, 'checked' => count($internIds), 'sent' => $sent, 'at' => $now->format('Y-m-d H:i:s')];
+$result = ['success' => true, 'checked' => count($internIds), 'sent' => $sent, 'autoClockedOut' => $autoClosed, 'at' => $now->format('Y-m-d H:i:s')];
 if (php_sapi_name() === 'cli') {
     echo json_encode($result, JSON_PRETTY_PRINT), PHP_EOL;
 } else {

@@ -935,7 +935,46 @@ function formatRecord(array $record): array
         'mode' => $record['clock_in_mode'] ?? 'Hybrid',
         'clockOutMode' => $record['clock_out_mode'],
         'status' => $record['effective_status'] ?? $record['status'] ?? 'On time',
+        'autoClockedOut' => (bool) ($record['auto_clocked_out'] ?? false),
+        'requestedClockOut' => !empty($record['requested_clock_out']) ? date('h:i A', strtotime($record['requested_clock_out'])) : '',
+        'requestStatus' => $record['clock_out_request_status'] ?? null,
     ];
+}
+
+/** Everyone who forgot to clock out is closed at this time, on their record's own date. */
+const AUTO_CLOCK_OUT_TIME = '18:00:00';
+
+/**
+ * Closes every still-open record whose 18:00 has passed, at 18:00 on that
+ * record's date. A clock-in after 18:00 is left open: its clock-out can't
+ * be earlier than its clock-in. Returns how many records were closed.
+ */
+function autoClockOut(PDO $pdo, DateTime $now): int
+{
+    $statement = $pdo->prepare(
+        "UPDATE attendance_records
+            SET clock_out = CONCAT(attendance_date, ' ', ?), clock_out_mode = clock_in_mode, auto_clocked_out = 1
+          WHERE clock_out IS NULL AND clock_in IS NOT NULL
+            AND clock_in <= CONCAT(attendance_date, ' ', ?)
+            AND CONCAT(attendance_date, ' ', ?) <= ?"
+    );
+    $statement->execute([AUTO_CLOCK_OUT_TIME, AUTO_CLOCK_OUT_TIME, AUTO_CLOCK_OUT_TIME, $now->format('Y-m-d H:i:s')]);
+    return $statement->rowCount();
+}
+
+/** Clock-out corrections waiting for an admin, oldest first, with intern names. */
+function pendingClockOutRequests(PDO $pdo): array
+{
+    $rows = $pdo->query(
+        "SELECT * FROM attendance_feed WHERE clock_out_request_status = 'Pending' ORDER BY attendance_date, requested_clock_out"
+    )->fetchAll();
+    $directory = internDirectory();
+    return array_map(static function (array $row) use ($directory): array {
+        $record = formatRecord($row);
+        $intern = $directory[$row['intern_id']] ?? null;
+        $record['internName'] = $intern ? trim($intern['first_name'] . ' ' . $intern['last_name']) : 'Unknown intern';
+        return $record;
+    }, $rows);
 }
 
 function currentRecords(PDO $pdo, string $internId): array

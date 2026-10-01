@@ -12,15 +12,37 @@ require_once __DIR__ . '/config.php';
 // CSV (opens directly in Excel) instead of JSON, honoring whatever
 // status/intern filter is also given -- so exporting mirrors whatever's
 // currently on screen.
-// Read-only either way; nothing here writes attendance on anyone's behalf.
+// GET ?requests=1 -- pending clock-out corrections; POST settles one.
 // ============================================================================
 
 try {
     requireAdmin();
     $pdo = database();
 
+    // POST {id, decision: approve|reject} -- settle a clock-out correction.
+    // Approve moves clock_out to the requested time; reject leaves 18:00.
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $input = json_decode(file_get_contents('php://input'), true) ?? [];
+        $decision = $input['decision'] ?? '';
+        if (!in_array($decision, ['approve', 'reject'], true)) {
+            respond(['success' => false, 'message' => 'Choose approve or reject.'], 422);
+        }
+        $update = $pdo->prepare($decision === 'approve'
+            ? "UPDATE attendance_records SET clock_out = requested_clock_out, clock_out_request_status = 'Approved' WHERE id = ? AND clock_out_request_status = 'Pending'"
+            : "UPDATE attendance_records SET clock_out_request_status = 'Rejected' WHERE id = ? AND clock_out_request_status = 'Pending'");
+        $update->execute([(int) ($input['id'] ?? 0)]);
+        if ($update->rowCount() !== 1) {
+            respond(['success' => false, 'message' => 'That request was already handled.'], 409);
+        }
+        respond(['success' => true, 'requests' => pendingClockOutRequests($pdo)]);
+    }
+
     if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
         respond(['success' => false, 'message' => 'Method not allowed.'], 405);
+    }
+
+    if (isset($_GET['requests'])) {
+        respond(['success' => true, 'requests' => pendingClockOutRequests($pdo)]);
     }
 
     // Every intern, for the admin's filter-by-name dropdown.

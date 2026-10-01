@@ -58,6 +58,34 @@ try {
     $longitude = isset($input['longitude']) ? (float) $input['longitude'] : null;
     $accuracy = isset($input['accuracy']) ? max(0, (float) $input['accuracy']) : null;
 
+    // "I actually left at 18:45" on a day the 18:00 auto clock-out closed.
+    // Only stored as a request: clock_out changes only when an admin approves.
+    if ($action === 'request_clock_out') {
+        $date = (string) ($input['date'] ?? '');
+        $time = (string) ($input['time'] ?? '');
+        $requested = DateTime::createFromFormat('Y-m-d H:i', "$date $time");
+        if (!$requested || $requested->format('Y-m-d H:i') !== "$date $time") {
+            respond(['success' => false, 'message' => 'Enter a valid clock-out time.'], 422);
+        }
+        if ($requested->format('H:i:s') <= AUTO_CLOCK_OUT_TIME || $requested > new DateTime()) {
+            respond(['success' => false, 'message' => 'The time must be after 6:00 PM and not in the future.'], 422);
+        }
+        $update = $pdo->prepare(
+            "UPDATE attendance_records SET requested_clock_out = ?, clock_out_request_status = 'Pending'
+              WHERE intern_id = ? AND attendance_date = ? AND auto_clocked_out = 1 AND clock_out_request_status IS NULL"
+        );
+        $update->execute([$requested->format('Y-m-d H:i:s'), $internId, $date]);
+        if ($update->rowCount() !== 1) {
+            respond(['success' => false, 'message' => 'There is nothing to correct for that day, or a request was already sent.'], 409);
+        }
+        respond([
+            'success' => true,
+            'message' => 'Request sent to the admin.',
+            'records' => currentRecords($pdo, $internId),
+            'today' => todayRecord($pdo, $internId),
+        ]);
+    }
+
     if (!in_array($action, ['in', 'out'], true) || !in_array($mode, ['Office', 'Hybrid'], true)) {
         respond(['success' => false, 'message' => 'Choose a valid attendance action and mode.'], 422);
     }
