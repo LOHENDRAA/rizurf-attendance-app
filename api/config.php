@@ -962,6 +962,46 @@ function autoClockOut(PDO $pdo, DateTime $now): int
     return $statement->rowCount();
 }
 
+/**
+ * Push one notification to every device of the given interns (all of their
+ * subscriptions, regardless of the reminder toggles -- these aren't
+ * reminders). Best-effort: a push failure never fails the caller's request.
+ */
+function notifyInterns(PDO $pdo, array $internIds, string $title, string $body): void
+{
+    if (!$internIds) {
+        return;
+    }
+    try {
+        require_once __DIR__ . '/vendor/autoload.php';
+        $placeholders = implode(',', array_fill(0, count($internIds), '?'));
+        $statement = $pdo->prepare("SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE intern_id IN ($placeholders)");
+        $statement->execute(array_values($internIds));
+        $webPush = new \Minishlink\WebPush\WebPush(['VAPID' => [
+            'subject' => envOrFail('VAPID_SUBJECT'),
+            'publicKey' => envOrFail('VAPID_PUBLIC_KEY'),
+            'privateKey' => envOrFail('VAPID_PRIVATE_KEY'),
+        ]], ['urgency' => 'high']);
+        $payload = json_encode(['title' => $title, 'body' => $body]);
+        foreach ($statement->fetchAll() as $row) {
+            $webPush->queueNotification(\Minishlink\WebPush\Subscription::create(['endpoint' => $row['endpoint'], 'keys' => ['p256dh' => $row['p256dh'], 'auth' => $row['auth']]]), $payload);
+        }
+        foreach ($webPush->flush() as $report) {
+            if (!$report->isSuccess() && in_array($report->getResponse()?->getStatusCode(), [404, 410], true)) {
+                $pdo->prepare('DELETE FROM push_subscriptions WHERE endpoint = ?')->execute([$report->getEndpoint()]);
+            }
+        }
+    } catch (Throwable $error) {
+        error_log('[attendance-api] notify "' . $title . '" failed: ' . $error->getMessage());
+    }
+}
+
+/** Intern ids of every admin who is linked to an intern record (and so may have push devices). */
+function adminInternIds(PDO $pdo): array
+{
+    return $pdo->query("SELECT DISTINCT intern_id FROM app_identities WHERE role = 'admin' AND intern_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+}
+
 /** Clock-out corrections waiting for an admin, oldest first, with intern names. */
 function pendingClockOutRequests(PDO $pdo): array
 {

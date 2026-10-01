@@ -34,6 +34,14 @@ try {
         if ($update->rowCount() !== 1) {
             respond(['success' => false, 'message' => 'That request was already handled.'], 409);
         }
+        $find = $pdo->prepare('SELECT intern_id, attendance_date, requested_clock_out FROM attendance_records WHERE id = ?');
+        $find->execute([(int) $input['id']]);
+        $row = $find->fetch();
+        $day = date('D, M j', strtotime($row['attendance_date']));
+        notifyInterns($pdo, [$row['intern_id']], $decision === 'approve' ? 'Clock-out request approved' : 'Clock-out request rejected',
+            $decision === 'approve'
+                ? "Your clock-out on $day is now " . date('g:i A', strtotime($row['requested_clock_out'])) . '.'
+                : "Your clock-out on $day stays at 6:00 PM.");
         respond(['success' => true, 'requests' => pendingClockOutRequests($pdo)]);
     }
 

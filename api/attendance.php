@@ -78,6 +78,10 @@ try {
         if ($update->rowCount() !== 1) {
             respond(['success' => false, 'message' => 'There is nothing to correct for that day, or a request was already sent.'], 409);
         }
+        $intern = internDirectory()[$internId] ?? null;
+        $name = $intern ? trim($intern['first_name'] . ' ' . $intern['last_name']) : 'An intern';
+        notifyInterns($pdo, adminInternIds($pdo), 'New clock-out request',
+            "$name says they clocked out at " . $requested->format('g:i A') . ' on ' . $requested->format('D, M j') . '.');
         respond([
             'success' => true,
             'message' => 'Request sent to the admin.',
