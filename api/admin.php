@@ -12,45 +12,47 @@ require_once __DIR__ . '/config.php';
 // CSV (opens directly in Excel) instead of JSON, honoring whatever
 // status/intern filter is also given -- so exporting mirrors whatever's
 // currently on screen.
-// GET ?requests=1 -- pending clock-out corrections; POST settles one.
+// POST edits one record's clock-in/out times (admin corrections).
 // ============================================================================
 
 try {
     requireAdmin();
     $pdo = database();
 
-    // POST {id, decision: approve|reject} -- settle a clock-out correction.
-    // Approve moves clock_out to the requested time; reject leaves 18:00.
+    // POST {id, clockIn: "HH:MM", clockOut: "HH:MM" | ""} -- fix a record by
+    // hand (forgot to clock out, slow scan...). Times are on the record's own
+    // date; the status follows the new clock-in, same rule as clocking in.
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
-        $decision = $input['decision'] ?? '';
-        if (!in_array($decision, ['approve', 'reject'], true)) {
-            respond(['success' => false, 'message' => 'Choose approve or reject.'], 422);
+        $clockIn = (string) ($input['clockIn'] ?? '');
+        $clockOut = (string) ($input['clockOut'] ?? '');
+        $isTime = static fn (string $t): bool => (bool) preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $t);
+        if (!$isTime($clockIn) || ($clockOut !== '' && !$isTime($clockOut))) {
+            respond(['success' => false, 'message' => 'Enter valid times.'], 422);
         }
-        $update = $pdo->prepare($decision === 'approve'
-            ? "UPDATE attendance_records SET clock_out = requested_clock_out, clock_out_request_status = 'Approved' WHERE id = ? AND clock_out_request_status = 'Pending'"
-            : "UPDATE attendance_records SET clock_out_request_status = 'Rejected' WHERE id = ? AND clock_out_request_status = 'Pending'");
-        $update->execute([(int) ($input['id'] ?? 0)]);
-        if ($update->rowCount() !== 1) {
-            respond(['success' => false, 'message' => 'That request was already handled.'], 409);
+        if ($clockOut !== '' && $clockOut < $clockIn) {
+            respond(['success' => false, 'message' => 'Clock-out cannot be before clock-in.'], 422);
         }
-        $find = $pdo->prepare('SELECT intern_id, attendance_date, requested_clock_out FROM attendance_records WHERE id = ?');
-        $find->execute([(int) $input['id']]);
-        $row = $find->fetch();
-        $day = date('D, M j', strtotime($row['attendance_date']));
-        notifyInterns($pdo, [$row['intern_id']], $decision === 'approve' ? 'Clock-out request approved' : 'Clock-out request rejected',
-            $decision === 'approve'
-                ? "Your clock-out on $day is now " . date('g:i A', strtotime($row['requested_clock_out'])) . '.'
-                : "Your clock-out on $day stays at 6:00 PM.");
-        respond(['success' => true, 'requests' => pendingClockOutRequests($pdo)]);
+        $update = $pdo->prepare(
+            "UPDATE attendance_records
+                SET clock_in = CONCAT(attendance_date, ' ', ?), status = ?,
+                    clock_out = IF(? = '', NULL, CONCAT(attendance_date, ' ', ?)),
+                    clock_out_mode = IF(? = '', NULL, COALESCE(clock_out_mode, clock_in_mode))
+              WHERE id = ?"
+        );
+        $update->execute(["$clockIn:00", clockInStatus($clockIn), $clockOut, "$clockOut:00", $clockOut, (int) ($input['id'] ?? 0)]);
+        if ($update->rowCount() === 0) {
+            $exists = $pdo->prepare('SELECT 1 FROM attendance_records WHERE id = ?');
+            $exists->execute([(int) ($input['id'] ?? 0)]);
+            if (!$exists->fetchColumn()) {
+                respond(['success' => false, 'message' => 'That attendance record no longer exists.'], 404);
+            }
+        }
+        respond(['success' => true]);
     }
 
     if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
         respond(['success' => false, 'message' => 'Method not allowed.'], 405);
-    }
-
-    if (isset($_GET['requests'])) {
-        respond(['success' => true, 'requests' => pendingClockOutRequests($pdo)]);
     }
 
     // Every intern, for the admin's filter-by-name dropdown.

@@ -76,12 +76,6 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   clock_in_qr          VARCHAR(100) NULL,
   clock_out_qr         VARCHAR(100) NULL,
   status               ENUM('On time','Late','Excused (MC)') NULL,
-  -- Closed by the 18:00 auto clock-out (cron-reminders.php), not the intern.
-  -- They can then ask for their real time; an admin approves it (clock_out
-  -- becomes requested_clock_out) or rejects it (clock_out stays 18:00).
-  auto_clocked_out           TINYINT(1) NOT NULL DEFAULT 0,
-  requested_clock_out        TIMESTAMP NULL DEFAULT NULL,
-  clock_out_request_status   ENUM('Pending','Approved','Rejected') NULL,
   created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
