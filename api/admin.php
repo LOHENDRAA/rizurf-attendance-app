@@ -99,7 +99,7 @@ try {
                     $record['clockIn'],
                     $record['clockOut'],
                     $record['mode'],
-                    $record['status'],
+                    $record['status'] . ($record['halfDay'] ? ' (half day)' : ''),
                 ]);
             }
             fclose($out);

@@ -938,13 +938,20 @@ function formatRecord(array $record): array
         // 24-hour HH:MM, for the admin's time inputs.
         'clockInTime' => $record['clock_in'] ? date('H:i', strtotime($record['clock_in'])) : '',
         'clockOutTime' => $record['clock_out'] ? date('H:i', strtotime($record['clock_out'])) : '',
+        'halfDay' => $record['clock_in'] && isHalfDay(date('H:i', strtotime($record['clock_in']))),
     ];
 }
 
-/** On time up to 09:10, early included. $time is HH:MM or HH:MM:SS. */
+/** Clocking in from lunch (12:00) on is an afternoon half day, which starts at 14:00. */
+function isHalfDay(string $time): bool
+{
+    return substr($time, 0, 5) >= '12:00';
+}
+
+/** On time up to 09:10, or 14:10 for a half day -- early included. $time is HH:MM or HH:MM:SS. */
 function clockInStatus(string $time): string
 {
-    return substr($time, 0, 5) <= '09:10' ? 'On time' : 'Late';
+    return substr($time, 0, 5) <= (isHalfDay($time) ? '14:10' : '09:10') ? 'On time' : 'Late';
 }
 
 function currentRecords(PDO $pdo, string $internId): array
